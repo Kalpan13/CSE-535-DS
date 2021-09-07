@@ -2,10 +2,12 @@
 
 CSE-535 Distributed System Project
 
-## Research Papers for Reference
+## Reference
 
-1. HotStuf: BFT Consensus in the Lens of Blockchain[https://arxiv.org/abs/1803.05069]
-2. State Machine Replication in the Libra Blockchain[https://cryptorating.eu/whitepapers/Libra/libra-consensus-state-machine-replication-in-the-libra-blockchain.pdf]
+1. [HotStuf: BFT Consensus in the Lens of Blockchain](https://arxiv.org/abs/1803.05069)
+2. [State Machine Replication in the Libra Blockchain](https://cryptorating.eu/whitepapers/Libra/libra-consensus-state-machine-replication-in-the-libra-blockchain.pdf) or [State Machine Replication in the Libra Blockchain-Blackboard](https://blackboard.stonybrook.edu/bbcswebdav/pid-6385429-dt-content-rid-58189988_1/courses/1218-CSE-535-SEC01-91468/State%20Machine%20Replication%20in%20the%20Libra%20Blockchain.pdf)
+3. [DistAlgo](https://github.com/DistAlgo/distalgo) 
+
 
 
 
