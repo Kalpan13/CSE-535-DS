@@ -2,7 +2,7 @@ import sys
 config(channel= 'fifo', clock= 'Lamport')
 
 class P(process):
-    def setup(s:set, nrequests:int): pass  # s is set of all other processes
+    def setup(s:set,  nrequests:int): pass  # s is set of all other processes
 
     def mutex(task):
         -- request
