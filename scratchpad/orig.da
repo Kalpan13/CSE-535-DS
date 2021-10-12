@@ -1,0 +1,415 @@
+import sys
+import random
+from typing import NamedTuple
+
+# # Enums for roles:
+# class Role: pass
+# class Validator(Role): pass
+# class Leader(Role): pass
+
+# class PendingBlockTree:
+#     def __init__(self):
+#         self.root = None
+    
+#     def add(self, block)
+#         if self.root == None:
+#             self.root = 
+
+class QC(NamedTuple):
+    vote_info : VoteInfo 
+    author : any = None
+
+class Block(NamedTuple):
+    author : any = None
+    _round_ : int
+    payload: string
+    qc: QC
+    parent: Block
+    isCommitted : bool
+    _id_ : int    # block_id 
+    
+    
+class VoteInfo(NamedTuple):
+    _id_ : int  # Unique ID of replica (0..n)
+    _round_ : int   # Round of VoteInfo
+    parent_id : int
+    parent_round : int
+
+class ProposalMsg(NamedTuple):
+    block : Block    # Current Block
+    # last_round : int   TODO : Implement this
+    high_commit_qc : QC   # QC of Highest Committed Block
+
+class PaceMaker:
+    def __init__(self):
+        self.current_round = 0
+        self.last_round_tc = None
+        
+    def start_timer(self, new_round):
+        self.current_round = new_round
+
+    def advance_round_qc(self, qc):
+        if qc.vote_info._round < self.current_round:
+            return False
+
+        self.start_timer(qc.vote_info.round+1)
+        self.last_round_tc = None
+        
+        #start_timer(qc.vote.info.round+1)  # TODO : Implement this
+        return True
+
+class BlockTree:
+    def __init__(self, Ledger):
+        self.pending_block_tree = None
+        self.pending_votes = None
+        self.high_qc = None
+        self.high_commit_qc = None
+        self.ledger = Ledger
+
+    def process_qc(self, qc):
+        if high_qc == None : # Base case
+            high_qc = qc
+
+        elif qc.vote_info._round_ > self.high_qc.vote_info._round_:
+            high_qc = qc
+    
+    def execute_and_insert(self, block):
+        
+
+
+class LeaderElection:
+    def __init__(self, peers, pace_maker):
+        self.validators = [] # The list of current validators
+        self.window_size = 0 # A parameter for the leader reputation algorithm
+        self.exclude_size = 0 # Between f and 2f, no. of excluded authors of last committed blocks
+        self.reputation_leaders = {} # Map from round numbers to leaders elected due to the reputation scheme
+        self.peers = peers
+        self.pace_maker = pace_maker
+
+    def update_leaders(self, qc):
+        pass
+
+    def get_leader(self, round):
+        # current leader = current_round % len(peers)
+        leader_id = self.pace_maker.current_round % len(self.peers)
+        return list(self.peers)[leader_id]
+        
+    # def elect_reputation_leaders(self, qc):
+    #     """ Finding a reputed leader for a particular round
+    #     Args:
+    #         qc(QC): Object of class Quoram Certificate
+    #     """
+    #     active_validators = {} # validators that signed the last window_size committed blocks
+    #     last_authors = {} # ordered set of authors of last exclude_size committed blocks
+    #     current_qc = qc
+        
+    #     i = 0
+    #     while i < window_size or len(last_authors) < exclude_size:
+    #         current_block = Ledger.committed_block(current_qc.vote_info.parent_id)
+    #         block_author = current_block.author
+            
+    #         if i < window_size:
+    #             active_validators = active_validators | current_qc.signatures.signers()
+           
+    #         if len(last_authors) < exclude_size:
+    #             last_authors = last_authors | block_author
+
+    #         current_qc = current_block.qc
+    #         i = i + 1
+        
+    #     active_validators = active_validators - last_authors # contains at least 1 validator
+    #     random.seed(qc.voteinfo.round)
+        
+    #     return random.choice(list(active_validators))
+
+    # def update_leaders(qc):
+    #     """ Enter in new round and find a reputed leader for that round
+    #     Args: 
+    #         qc(QC): Object of class Quoram Certificate
+    #     """
+    #     extended_round = qc.vote_info.parent_round
+    #     qc_round = qc.vote_info.round
+    #     current_round = PaceMaker.current_round
+    #     if extended_round + 1 == qc_round and qc_round + 1 == current_round:
+    #         reputation_leaders[current_round + 1] = elect_reputation_leader(qc)
+
+    # def get_leader(current_round):
+    #     """ Fetch leader for current round
+    #     Args:
+    #         current_round(int): current round number
+    #     """
+    #     if reputation_leaders.has_key(current_round):
+    #         return reputation_leaders[current_round]
+        
+    #     return validators[(current_round/2) % len(validators)] # Round-robin leader (two rounds per leader)
+
+
+class LogEntry:
+    """Fictional log entries."""
+    def __init__(self, term, client, command):
+        self.term = term
+        self.client = client
+        self.command = command
+
+    def __str__(self):
+        sl = ['LogEntry', str(self.term), str(self.client), str(self.command)]
+        return ':'.join(sl)
+
+
+
+class Server(process):
+    
+        
+    def setup(peers, maxTimeout):
+        self.currentRole = Validator # Tracks server state
+        
+        '''
+        # Safety Module Parameters
+        self.private_key = None # Private Key
+        self.public_keys = [] # Public keys of all replicas
+        self.highest_vote_round = 0 # Max of round_value voted so far
+        self.highest_qc_round = 0 # Max of highQC voted so far
+        
+        '''
+        '''
+        # Persistent states:
+        self.currentTerm = 0
+        self.votedFor = None
+        self.log = [LogEntry(term=0, client=None, command=None)]
+        # Volatile states:
+        self.commitIndex = 0
+        self.lastApplied = 0
+        # Leader states:
+        self.nextIndex = dict((p, 1) for p in peers)
+        self.matchIndex = dict((p, 0) for p in peers)
+        self.has_idled = False  # True if the leader needs to broadcast a heartbeat
+
+        self.last_seen_leader = None # Shortcut for informing clients
+        self._dispatch_table = {Follower  : self.follower_term,
+                                Candidate : self.candidate_term,
+                                Leader    : self.leader_term}
+
+        '''
+        self.block_tree = BlockTree()
+        self.pace_maker = PaceMaker()
+        self.leader_election = LeaderElection()
+        
+    def run():
+        while True:
+            
+            # Choose randomized timeout value for this term:
+            termTimeout = random.randint(int(maxTimeout/2), maxTimeout) / 1000
+
+            # Dispatch based on current server role:
+            #_dispatch_table[currentRole](termTimeout)
+            if await(some(received(('AppendEntries', term, _, _, _, _, _)),
+                      has= term >= currentTerm)):
+    # def start_event_processing(M):
+    #     if M
+    def process_proposal_msg(P):
+        process_certificate_qc(P.block.qc)
+        process_certtificate_qc(P.high_commit_qc)
+        _round_ = pace_maker.current_round
+        _leader_ = self.leader_election.get_leader(current_round)
+        
+        if P.block._round_ != _round_ or P.block.author != leader_election.get_leader():
+            return
+        # Block-Tree.execute_and_insert
+
+            
+        
+    def receive(msg= ('ProposalMsg',P), from_=leader_election.get_leader()):
+        process_proposal_msg(P)
+
+    def follower_term(termTimeout):
+        if await(some(received(('AppendEntries', term, _, _, _, _, _)),
+                      has= term >= currentTerm)):
+            reset(received)
+        elif timeout(termTimeout):
+            output("Heartbeat timeout, transitioning to Candidate state.")
+            currentRole = Candidate
+
+    def candidate_term(termTimeout):
+        #--start_election
+        currentTerm += 1
+        output("Logging peers : "+str((peers)))
+        RequestVoteRPC(target=peers,
+                       term=currentTerm,
+                       candidateId=self,
+                       lastLogIndex=len(log)-1,
+                       lastLogTerm=log[-1].term)
+        if await(len(setof(p, received(('RequestVoteReply', _currentTerm, True),
+                                       from_=p))) > len(peers)/2):
+            output("Transitioning to Leader.")
+            currentRole = Leader
+            # Reinitialize volatile Leader states:
+            nextIndex = dict((p, len(log)) for p in peers)
+            output("Initializing new next index :"+str(nextIndex))
+            matchIndex = dict((p, 0) for p in peers)
+            has_idled = True    # Force initial heartbeat
+        elif some(received(('AppendEntries', term, leader, _, _, _, _)),
+                  has= term >= currentTerm):
+            output("Elected leader:", leader, "Reverting to Follower.")
+            currentTerm = term
+            currentRole = Follower
+        elif timeout(termTimeout):
+            output("Election term", currentTerm, "timeout, restarting.")
+
+    def leader_term(termTimeout):
+        for server, index in nextIndex.items():
+            if has_idled or index < len(log):
+                AppendEntriesRPC(target=server,
+                                 term=currentTerm,
+                                 leaderId=self,
+                                 prevLogIndex=index-1,
+                                 prevLogTerm=log[index-1].term,
+                                 entries=log[index:],
+                                 leaderCommit=commitIndex)
+        has_idled = False
+        if await(currentRole is not Leader):   # TODO: Why this
+            #output("Waiting to check if currentRole is leader or not")
+            return
+        elif some(n in range(len(log) - 1),  # TODO : Understand
+                  has= (n > commitIndex and
+                        len(setof(i, i in matchIndex, matchIndex[i] >= n)) >
+                        len(peers) / 2 and
+                        log[n].term == currentTerm)):
+            debug("Updating commitIndex from %d to %d" % (commitIndex, n))
+            commitIndex = n
+        # Idle timeout is half of normal term timeout:
+        elif timeout(termTimeout/2):
+            debug("Idle timeout triggered.")
+            has_idled = True
+
+    def receive(msg= ('RequestVote', term, candidateId,
+                      lastLogIndex, lastLogTerm)):
+        update_term(term)
+        if term < currentTerm:
+            RequestVoteReply(target=candidateId,
+                             term=currentTerm, voteGranted=False)
+        elif ((votedFor is None or votedFor == candidateId) and
+              is_up_to_date(lastLogIndex, lastLogTerm)):
+            votedFor = candidateId
+            RequestVoteReply(target=candidateId,
+                             term=currentTerm, voteGranted=True)
+        else:
+            RequestVoteReply(target=candidateId,
+                             term=currentTerm, voteGranted=False)
+
+    def receive(msg= ('RequestVoteReply', term, False)):
+        update_term(term)
+
+    def receive(msg= ('AppendEntries', term, leaderId, prevLogIndex, prevLogTerm,
+                      entries, leaderCommit)):
+        update_term(term)
+        if term < currentTerm:
+            AppendEntriesReply(target=leaderId,
+                               term=currentTerm, success=False)
+        elif not (len(log) > prevLogIndex and
+                  log[prevLogIndex].term == prevLogTerm):
+            AppendEntriesReply(target=leaderId,
+                               term=currentTerm, success=False)
+        else:
+            last_seen_leader = leaderId
+            for idx, entry in enumerate(entries):
+                idx += prevLogIndex + 1
+                if len(log) <= idx:
+                    log.append(entry)
+                elif log[idx].term != entry.term:
+                    del log[idx:]
+            last_new_index = prevLogIndex + len(entries)
+            if leaderCommit > commitIndex:
+                commitIndex = min(leaderCommit, last_new_index)
+            AppendEntriesReply(target=leaderId,
+                               term=currentTerm, success=True,
+                               updatedIndex=last_new_index)
+
+    def receive(msg= ('AppendEntriesReply', term, success, updatedIndex),
+                from_=server):
+        update_term(term)
+        # Further action is only needed if we are still leader:
+        if currentRole is Leader:
+            if success:
+                nextIndex[server] = updatedIndex + 1
+                matchIndex[server] = updatedIndex
+            else:
+                # Failed because of log inconsistency:
+                nextIndex[server] -= 1
+
+    def receive(msg= ('ClientRequest', serial), from_=client):
+        if currentRole is not Leader:
+            send(('NotLeader', serial, last_seen_leader), to=client)
+        else:
+            log.append(LogEntry(currentTerm, client, serial))
+
+    def update_term(term):
+        if currentTerm < term:
+            currentTerm = term
+            votedFor = None
+            currentRole = Follower
+
+    def is_up_to_date(lastLogIndex, lastLogTerm):
+        return (lastLogTerm, lastLogIndex) >= (log[-1].term, len(log)-1)
+
+    def commit_to_state_machine():
+        entry = log[lastApplied]
+        output(entry, " at index", lastApplied, "applied to state machine.")
+        if currentRole is Leader:
+            send(('Reply', entry.command, self), to=entry.client)
+
+    def AppendEntriesRPC(target, term, leaderId, prevLogIndex, prevLogTerm,
+                         entries, leaderCommit):
+        send(('AppendEntries', term, leaderId, prevLogIndex, prevLogTerm,
+              entries, leaderCommit), to=target)
+
+    def AppendEntriesReply(target, term, success, updatedIndex=None):
+        # FIXME: 'updatedIndex' is not in original algorithm!
+        # We need this additional information to pair the reply with the
+        # original RPC request
+        send(('AppendEntriesReply', term, success, updatedIndex), to=target)
+
+    def RequestVoteRPC(target, term, candidateId, lastLogIndex, lastLogTerm):
+        send(('RequestVote', term, candidateId, lastLogIndex, lastLogTerm),
+             to=target)
+
+    def RequestVoteReply(target, term, voteGranted):
+        send(('RequestVoteReply', term, voteGranted), to=target)
+
+class Client(process):
+    def setup(servers, nrequests, timeout): pass
+
+    def run():
+        target = random.choice(servers)
+        req = 0
+        while req < nrequests:
+            send(('ClientRequest', req), to=target)
+            if await(some(received(('NotLeader', _req, leader)),
+                          has= leader is not None)):
+                debug("Wrong server, changing to", leader)
+                target = leader
+                reset(received)
+            elif some(received(('Reply', _req, _))):
+                output("Request", req + 1, "complete.")
+                req += 1
+            elif timeout(timeout/1000):
+                debug("Server", target, "timed out, choosing new one randomly.")
+                target = random.choice(servers)
+
+        send(('Done',), to=parent())
+
+def main():
+    nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 5
+    nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 3
+    nrequests = int(sys.argv[3]) if len(sys.argv) > 3 else 3
+    maxtimeout = int(sys.argv[4]) if len(sys.argv) > 4 else 3000
+    send_failrate = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0
+
+    servers = new(Server, num= nservers, send= send_failrate)
+    setup(servers, (servers, maxtimeout))
+    clients = new(Client, num= nclients)
+    setup(clients, (list(servers), nrequests, maxtimeout))
+    start(servers)
+    start(clients)
+    await(each(c in clients, has=received(('Done',), from_=c)))
+    output("All clients done.")
+    end(servers)
