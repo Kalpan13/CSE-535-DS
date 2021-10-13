@@ -1,19 +1,8 @@
 import sys
 import random
 from typing import NamedTuple
+import treelib
 
-# # Enums for roles:
-# class Role: pass
-# class Validator(Role): pass
-# class Leader(Role): pass
-
-# class PendingBlockTree:
-#     def __init__(self):
-#         self.root = None
-    
-#     def add(self, block)
-#         if self.root == None:
-#             self.root = 
 
 class QC(NamedTuple):
     vote_info : VoteInfo 
@@ -24,13 +13,12 @@ class Block(NamedTuple):
     _round_ : int
     payload: string
     qc: QC
-    parent: Block
-    isCommitted : bool
-    _id_ : int    # block_id 
-    
+    parent : any = None
+    isCommitted : bool = False
+    _id : int = -1    # block_id 
     
 class VoteInfo(NamedTuple):
-    _id_ : int  # Unique ID of replica (0..n)
+    _id : int  # Unique ID of replica (0..n)
     _round_ : int   # Round of VoteInfo
     parent_id : int
     parent_round : int
@@ -39,6 +27,11 @@ class ProposalMsg(NamedTuple):
     block : Block    # Current Block
     # last_round : int   TODO : Implement this
     high_commit_qc : QC   # QC of Highest Committed Block
+
+class VoteMsg(NamedTuple):
+    vote_info : VoteInfo
+    high_commit_qc : QC
+    sender : any = None
 
 class PaceMaker:
     def __init__(self):
@@ -57,25 +50,7 @@ class PaceMaker:
         
         #start_timer(qc.vote.info.round+1)  # TODO : Implement this
         return True
-
-class BlockTree:
-    def __init__(self, Ledger):
-        self.pending_block_tree = None
-        self.pending_votes = None
-        self.high_qc = None
-        self.high_commit_qc = None
-        self.ledger = Ledger
-
-    def process_qc(self, qc):
-        if high_qc == None : # Base case
-            high_qc = qc
-
-        elif qc.vote_info._round_ > self.high_qc.vote_info._round_:
-            high_qc = qc
-    
-    def execute_and_insert(self, block):
         
-
 
 class LeaderElection:
     def __init__(self, peers, pace_maker):
@@ -157,12 +132,49 @@ class LogEntry:
 
 
 
-class Server(process):
-    
+class Validator(process):
         
     def setup(peers, maxTimeout):
         self.currentRole = Validator # Tracks server state
+       
+        # Safety Class Variables
+        self.private_key = None # Private Key
+        self.public_keys = [] # Public keys of all replicas
+        self.highest_vote_round = 0 # Max of round_value voted so far
+        self.highest_qc_round = 0 # Max of highQC voted so far
+
+        # Block Tree Variables
+        self.pending_block_tree = None
+        self.pending_votes = None
+        self.high_qc = None
+        self.high_commit_qc = None
+        self.ledger = Ledger
+
+        # ledger Variables
+        self.genesis_block = Block(
+            author = self, 
+            _round_ = -1, 
+            payload = "No Op", 
+            qc = None, 
+            parent = None, 
+            isCommitted = True,
+            _id = -1)    # block_id 
         
+        self.ledger_tree = Tree()
+        self.ledger_tree.create_node("genesis_block",hash(genesis_block),data=self.genesis_block)
+
+        # Leader Election Variables
+        self.validators = [] # The list of current validators
+        self.window_size = 0 # A parameter for the leader reputation algorithm
+        self.exclude_size = 0 # Between f and 2f, no. of excluded authors of last committed blocks
+        self.reputation_leaders = {} # Map from round numbers to leaders elected due to the reputation scheme
+        self.peers = peers
+        self.pace_maker = pace_maker
+
+        # Pacemaker Variables
+        self.current_round = 0
+        self.last_round_tc = None
+    
         '''
         # Safety Module Parameters
         self.private_key = None # Private Key
@@ -190,10 +202,185 @@ class Server(process):
                                 Leader    : self.leader_term}
 
         '''
-        self.block_tree = BlockTree()
-        self.pace_maker = PaceMaker()
-        self.leader_election = LeaderElection()
         
+    
+    ############ Safety Module ############
+    def Safety_increase_highest_vote_round(round):
+        """ Commit not to vote in rounds < highest_vote_round
+        Args:
+            round (int): current round number
+        """
+        highest_vote_round = max(round,highest_vote_round)
+
+    def Safety_update_highest_qc_round(qc_round) :
+        """ Update the highest qc round 
+
+        Args:
+            qc_round (int): 
+        """
+        highest_qc_round = max(qc_round, highest_qc_round)
+    
+    def Safety_consecutive(block_round, round):
+        """
+        To check if `block_round` is the next round of `round` or not 
+
+        Args:
+            block_round (int): [description]
+            round (int): [description]
+        Returns:
+            bool: True if `block_round` == round + 1 else False
+        """
+        return round + 1 == block_round
+    
+    def Safety_safe_to_extend(block_round, qc_round, tc) :
+        # TODO : Check the type of tc
+        """ 
+        To check if current tc is safe to extend or not 
+
+        Args:
+            block_round (int): [description]
+            qc_round (int): [description]
+            tc (): [description]
+        Returns:
+            bool: 
+        """
+        # Two Conditions 
+        # 1. block_round is next round of tc.round
+        # 2. qc_round >= max (tc.tmo_high_qc_rounds)
+        return Safety_consecutive(block_round, tc.round) \
+            and qc_round >= max(tc.tmo_high_qc_rounds)
+
+    def Safety_safe_to_vote(block_round, qc_round, tc) :
+        """
+        To check if current tc is safe to vote or not
+
+        Args:
+            block_round (int): [description]
+            qc_round (int): [description]
+            tc (): [description]
+
+        Returns:
+            bool: [description]
+        """
+        # Two Conditions 
+        # 1. Must vote in monotonically increasing rounds
+        # 2. Must extend a smaller round
+
+        if block_round <= max(highest_vote_round, qc_round):
+            return False
+
+        # Extending QC from previous round || safe to extend due to tc
+        return Safety_consecutive(block_round, qc_round) \
+        #    or safe_to_extend(block_round, qc_round, tc)
+    
+    def Safety_commit_state_id_candidate(block_round, qc):
+        """[summary]
+
+        Args:
+            block_round ([type]): [description]
+            qc ([type]): [description]
+        """
+        # Find the committed id in case a qc is formed in the vote round
+
+        if Safety_consecutive(block_round, qc.vote_info._round_):
+            return Ledger.pending_state(qc._id)
+        else:
+            return None 
+    
+    def Safety_make_vote(b, last_tc = None):
+        qc_round = b.qc.vote_info._round_  # qc_round of block
+        if Safety_safe_to_vote(b.round, qc_round, None):
+            Safety_update_highest_qc_round(qc_round) # Protect QC round
+            Safety_increase_highest_vote_round(b._round_)
+            vote_info = VoteInfo( _id = b._id, _round_ = b._round_, parent_id = b.qc.vote_info._id, parent_round = qc_round )
+            vote_msg = VoteMsg(vote_info = vote_info, QC = block_tree.high_commit_qc, sender = self)
+            return vote_msg
+
+        return None
+
+    def Safety_make_timeout(_round_, high_qc, last_tc = None)
+        # if self.valid_signatures(b, last_tc) and self.safe_to_vote(b.round, qc_round, last_tc):
+        #     self.update_highest_qc_round(qc_round)
+        #     self.increase_highest_vote_round(b.round)
+        pass
+
+    def Safety_valid_signatures(b, last_tc):
+        # TODO : Implement this : Validate with available Public keys 
+        return True
+    
+    ############ Ledger ############ 
+    def Ledger_speculate(prev_block_id, block_id, block, txns):
+        if prev_block_id is None:
+            ledger_tree.create_node(str(txns), hash(block), parent = hash(genesis_block), data = block)
+        else:
+            ledger_tree.create_node(str(txns),hash(block), parent=prev_block_id)
+    
+    def Ledger_pending_state(block_id):
+        if ledger_tree.get_node(block_id).data.isCommitted:
+            return None
+        else
+            return 
+
+    def Ledger_commit(block_id):
+        if not ledger_tree.get_node(block_id).data.isCommitted:
+            ledger_tree.get_node(block_id).data.isCommitted = True
+            output(f"Block : {block_id} committed by {str(self)}")
+
+    def Ledger_commit_block(block_id):
+        ledger_tree.get_node(block_id).data.block
+    
+    ############ Block Tree ############ 
+    def Block_Tree_process_qc(qc):
+        Ledger_commit(qc.vote_info.parent_id)
+        if high_qc == None : # Base case
+            high_qc = qc
+        elif qc.vote_info._round_ > high_qc.vote_info._round_:
+            high_qc = qc
+
+        if high_commit_qc == None : # Base case
+            high_commit_qc = qc
+        elif qc.vote_info._round_ > high_commit_qc.vote_info._round_:
+            high_commit_qc = qc
+
+    
+    def Block_Tree_process_vote(vote_msg):
+        Block_Tree_process_qc(vote_msg.high_commit_qc)
+
+        if await(len(setof(p, received(('VoteMsg',_), from_=p))) > len(peers) >= (2*f + 1):
+            qc = QC(vote_info=vote_msg.vote_info, author = self)
+            return qc
+        else
+            output("Timed out in Block Tree process_vote")
+            # TODO : Implement timeout
+            return None
+    
+    def Block_Tree_generate_block(txns, current_round):
+        b = Block(author=self, _round_=current_round, payload=txns, qc=high_qc, isCommitted = False)
+        b._id = hash(b)
+        return b
+
+    ############ Leader Election ############ 
+    def Leader_Election_update_leaders(qc):
+        pass
+
+    def Leader_Election_get_leader(round):
+        # current leader = current_round % len(peers)
+        leader_id = Pacemaker.current_round % len(peers)
+        return list(peers)[leader_id]
+
+    ############ Pacemaker ############  
+    def Pacemaker_start_timer(new_round):
+        current_round = new_round
+
+    def Pacemaker_advance_round_qc(qc):
+        if qc.vote_info._round < current_round:
+            return False
+
+        Pacemaker_start_timer(qc.vote_info.round+1)
+        last_round_tc = None
+        #start_timer(qc.vote.info.round+1)  # TODO : Implement this
+        return True
+
     def run():
         while True:
             
@@ -204,23 +391,39 @@ class Server(process):
             #_dispatch_table[currentRole](termTimeout)
             if await(some(received(('AppendEntries', term, _, _, _, _, _)),
                       has= term >= currentTerm)):
-    # def start_event_processing(M):
-    #     if M
+    
+    def process_certificate_qc(qc):
+        # TODO : Implement this
+        Block_Tree_process_qc(qc)
+        Leader_Election_update_leaders(qc)
+        Pacemaker_advance_round(qc.vote_info._round_)
+
     def process_proposal_msg(P):
         process_certificate_qc(P.block.qc)
-        process_certtificate_qc(P.high_commit_qc)
+        process_certificate_qc(P.high_commit_qc)
         _round_ = pace_maker.current_round
-        _leader_ = self.leader_election.get_leader(current_round)
+        _leader_ = Leader_Election_get_leader(current_round)
         
         if P.block._round_ != _round_ or P.block.author != leader_election.get_leader():
             return
         # Block-Tree.execute_and_insert
+        vote_msg = Safety_make_vote(P.block)
+        if vote_msg is not None:
+            send(('VoteMsg',vote_msg), to=Leader_Election.get_leader(current_round+1))
+    
+    def process_vote_msg(P):
+        qc = Block_Tree_process_vote(P)
+        if q is not None:
+            process_certificate_qc(qc)
+            process_new_round_event(None)
 
-            
-        
+    def receive(msg = ('ClientRequest')
+        mempool.add(txn)
     def receive(msg= ('ProposalMsg',P), from_=leader_election.get_leader()):
         process_proposal_msg(P)
 
+    def receive(msg=('VoteMsg',P), from_=)
+    
     def follower_term(termTimeout):
         if await(some(received(('AppendEntries', term, _, _, _, _, _)),
                       has= term >= currentTerm)):
