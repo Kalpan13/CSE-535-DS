@@ -1,37 +1,9 @@
 import sys
 import random
-from typing import NamedTuple
 import treelib
 from treelib import Node, Tree
+from scratchpad.structures import Block
 
-class QC(NamedTuple):
-    vote_info : VoteInfo 
-    author : any = None
-
-class Block(NamedTuple):
-    author : any = None
-    _round_ : int
-    payload: string
-    qc: QC
-    parent : any = None
-    isCommitted : bool = False
-    _id : int = -1    # block_id 
-    
-class VoteInfo(NamedTuple):
-    _id : int  # Unique ID of replica (0..n)
-    _round_ : int   # Round of VoteInfo
-    parent_id : int
-    parent_round : int
-
-class ProposalMsg(NamedTuple):
-    block : Block    # Current Block
-    # last_round : int   TODO : Implement this
-    high_commit_qc : QC   # QC of Highest Committed Block
-
-class VoteMsg(NamedTuple):
-    vote_info : VoteInfo
-    high_commit_qc : QC
-    sender : any = None
 
 class LogEntry:
     """Fictional log entries."""
@@ -63,15 +35,15 @@ class Validator(process):
         # ledger Variables
         self.genesis_block = Block(
             author = self, 
-            _round_ = -1, 
+            roundx = -1, 
             payload = "No Op", 
             qc = None, 
             parent = None, 
             isCommitted = True,
-            _id = -1)    # block_id 
+            idx = -1)    # block_id 
         
-        self.ledger_tree = Tree()
-        self.ledger_tree.create_node("genesis_block", hash(genesis_block) , data = self.genesis_block)
+        # self.ledger_tree = Tree()
+        # self.ledger_tree.create_node("genesis_block", hash(genesis_block) , data = self.genesis_block)
 
         # Leader Election Variables
         self.validators = [] # The list of current validators
@@ -85,7 +57,31 @@ class Validator(process):
         self.last_round_tc = None
 
         # Mempool
-        #self.memopool = [] # Queue to maintain client transactions        
+        self.mempool = [] # Queue to maintain client transactions      
+
+    def run():
+        output("Peers : "+str(peers.union({self})))
+        #process_incoming_msg()
+        # while len(mempool) > 0:
+        #     output("Running")
+
+        # Choose randomized timeout value for this term:
+        while True:
+            termTimeout = random.randint(int(maxTimeout/2), maxTimeout) / 1000
+            follower_term(termTimeout)
+
+    def follower_term(termTimeout):
+        elif timeout(termTimeout):
+            output("Heartbeat timeout, transitioning to Candidate state.")
+            
+
+    def process_incoming_msg():
+        if await(len(received((_, _, _, _, _, _, _)),
+                      has= term >= currentTerm)):
+            reset(received)
+        
+        --receive
+
     '''
     ############ Safety Module ############
     def Safety_increase_highest_vote_round(round):
@@ -165,23 +161,23 @@ class Validator(process):
         """
         # Find the committed id in case a qc is formed in the vote round
 
-        if Safety_consecutive(block_round, qc.vote_info._round_):
+        if Safety_consecutive(block_round, qc.vote_info.roundx):
             return Ledger_pending_state(qc._id)
         else:
             return None 
     
     def Safety_make_vote(b, last_tc = None):
-        qc_round = b.qc.vote_info._round_  # qc_round of block
+        qc_round = b.qc.vote_info.roundx  # qc_round of block
         if Safety_safe_to_vote(b.round, qc_round, None):
             Safety_update_highest_qc_round(qc_round) # Protect QC round
-            Safety_increase_highest_vote_round(b._round_)
-            vote_info = VoteInfo( _id = b._id, _round_ = b._round_, parent_id = b.qc.vote_info._id, parent_round = qc_round )
+            Safety_increase_highest_vote_round(b.roundx)
+            vote_info = VoteInfo( _id = b._id, roundx = b.roundx, parent_id = b.qc.vote_info._id, parent_round = qc_round )
             vote_msg = VoteMsg(vote_info = vote_info, QC = high_commit_qc, sender = self)
             return vote_msg
 
         return None
 
-    def Safety_make_timeout(_round_, high_qc, last_tc = None):
+    def Safety_make_timeout(roundx, high_qc, last_tc = None):
         # if self.valid_signatures(b, last_tc) and self.safe_to_vote(b.round, qc_round, last_tc):
         #     self.update_highest_qc_round(qc_round)
         #     self.increase_highest_vote_round(b.round)
@@ -217,12 +213,12 @@ class Validator(process):
         Ledger_commit(qc.vote_info.parent_id)
         if high_qc == None : # Base case
             high_qc = qc
-        elif qc.vote_info._round_ > high_qc.vote_info._round_:
+        elif qc.vote_info.roundx > high_qc.vote_info.roundx:
             high_qc = qc
 
         if high_commit_qc == None : # Base case
             high_commit_qc = qc
-        elif qc.vote_info._round_ > high_commit_qc.vote_info._round_:
+        elif qc.vote_info.roundx > high_commit_qc.vote_info.roundx:
             high_commit_qc = qc
 
     def Block_Tree_process_vote(vote_msg):
@@ -237,19 +233,19 @@ class Validator(process):
             return None
     
     def Block_Tree_generate_block(txns, current_round):
-        b = Block(author=self, _round_=current_round, payload=txns, qc=high_qc, isCommitted = False)
+        b = Block(author=self, roundx=current_round, payload=txns, qc=high_qc, isCommitted = False)
         b._id = hash(b)
         return b
 
     ############ Leader Election ############ 
     def Leader_Election_update_leaders(qc):
         pass
-
+    '''
     def Leader_Election_get_leader():
         # current leader = current_round % len(peers)
         leader_id = current_round % len(peers)
         return list(peers)[leader_id]
-
+    '''
     ############ Pacemaker ############  
     def Pacemaker_start_timer(new_round):
         current_round = new_round
@@ -263,35 +259,21 @@ class Validator(process):
         #start_timer(qc.vote.info.round+1)  # TODO : Implement this
         return True
     '''
-    def run():
-        output("Peers : "+str(peers.union({self})))
-        output(f"Type of Peer : {list(peers)[0]}")
-        x = isinstance(list(peers)[0], Validator)
-        output(f"isinstance of : {x}")
-        while True:
-            if 1 > 0:
-                output("Running ")
-
-            # Choose randomized timeout value for this term:
-            termTimeout = random.randint(int(maxTimeout/2), maxTimeout) / 1000
-
-            # Dispatch based on current server role:
-            #_dispatch_table[currentRole](termTimeout)
     
     '''
     def process_certificate_qc(qc):
         # TODO : Implement this
         Block_Tree_process_qc(qc)
         Leader_Election_update_leaders(qc)
-        Pacemaker_advance_round_qc(qc.vote_info._round_)
+        Pacemaker_advance_round_qc(qc.vote_info.roundx)
 
     def process_proposal_msg(P):
         process_certificate_qc(P.block.qc)
         process_certificate_qc(P.high_commit_qc)
-        _round_ = current_round
+        roundx = current_round
         _leader_ = Leader_Election_get_leader(current_round)
         
-        if P.block._round_ != _round_ or P.block.author != Leader_Election_get_leader():
+        if P.block.roundx != roundx or P.block.author != Leader_Election_get_leader():
             return
         # Block-Tree.execute_and_insert
         vote_msg = Safety_make_vote(P.block)
@@ -312,33 +294,39 @@ class Validator(process):
             # b ← Block-Tree.generate block( MemPool.get transactions(),
             # Pacemaker.current round )
             # broadcast ProposalMsghb, last tc, Block-Tree.high commit qc
-            
+    '''      
     def receive(msg = ('ClientRequest', txn), from_=client):
-        if self == Leader_Election_get_leader():
-            # Prepare block
-            send(('Preparing Block', txn,self), to=client)
-        else:
-            send(('NotLeader', txn, Leader_Election_get_leader()), to=client)
-    
-    def receive(msg= ('ProposalMsg',P), from_=Leader_Election_get_leader()):
-        process_proposal_msg(P)
-    '''
+        output(f"Client Request Received for {txn}")
+        mempool.add(txn)
+
+        # if self == Leader_Election_get_leader():
+        #      # Prepare block
+        #      send(('Preparing Block', txn, self), to=client)
+        # else:
+        #      send(('NotLeader', txn, Leader_Election_get_leader()), to=client)
+        
+    # def receive(msg= ('ProposalMsg',P), from_=Leader_Election_get_leader()):
+    #     process_proposal_msg(P)
     
 class Client(process):
     def setup(servers, nrequests, timeout): pass
 
     def run():
-        target = random.choice(servers)
+        commands = ["abc", "def", "ghi", "lmn"]
+        #target = random.choice(servers)
         req = 0
+
+        debug(f"Starting Client with servers : {servers}")
         while req < nrequests:
-            send(('ClientRequest', req), to=target)
-            if await(some(received(('NotLeader', _req, leader)),
+            req_text = commands[req]
+            send(('ClientRequest', req_text), to=servers)
+            if await(some(received(('NotLeader', _req_text, leader)),
                           has= leader is not None)):
                 debug("Wrong server, changing to", leader)
                 target = leader
                 reset(received)
-            elif some(received(('Reply', _req, _))):
-                output("Request", req + 1, "complete.")
+            elif some(received(('Reply', _req_text, _))):
+                output("Request", commands[req + 1], "complete.")
                 req += 1
             elif timeout(timeout/1000):
                 debug("Server", target, "timed out, choosing new one randomly.")
@@ -347,9 +335,9 @@ class Client(process):
         send(('Done',), to=parent())
 
 def main():
-    nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 5
-    nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 3
-    nrequests = int(sys.argv[3]) if len(sys.argv) > 3 else 3
+    nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 4
+    nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+    nrequests = int(sys.argv[3]) if len(sys.argv) > 3 else 1
     maxtimeout = int(sys.argv[4]) if len(sys.argv) > 4 else 3000
     send_failrate = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0
 
