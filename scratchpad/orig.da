@@ -216,13 +216,17 @@ class Validator(process):
     #     # TODO : Implement this : Validate with available Public keys 
     #     return True
     
-    ############ Ledger ############ 
-    # def Ledger_speculate(prev_block_id, block_id, block, txns):
-    #     if prev_block_id is None:
-    #         ledger_tree.create_node(str(txns), hash(block), parent = hash(genesis_block), data = block)
-    #     else:
-    #         ledger_tree.create_node(str(txns),hash(block), parent=prev_block_id)
-    
+    ########### Ledger ############ 
+    def Ledger_speculate(prev_block_id, block_id, block, txns):
+        output(f"Creating New Node is ledger for {str(block)}")
+        if prev_block_id is None:
+            ledger_tree.create_node(str(txns), hash(block), parent=hash(genesis_block), data = block)
+        else:
+            ledger_tree.create_node(str(txns), hash(block), parent=prev_block_id, data = block)
+        
+        output(f"Node Created...")
+        output(ledger_tree.show())
+        return
     # def Ledger_pending_state(block_id):
     #     if ledger_tree.get_node(block_id).data.isCommitted:
     #         return None
@@ -230,6 +234,7 @@ class Validator(process):
     #         return 
 
     # def Ledger_commit(block_id):
+        
     #     if not ledger_tree.get_node(block_id).data.isCommitted:
     #         ledger_tree.get_node(block_id).data.isCommitted = True
     #         output(f"Block : {block_id} committed by {str(self)}")
@@ -241,7 +246,7 @@ class Validator(process):
     def Block_Tree_process_qc(qc):
         if qc is None:
             return
-        Ledger_commit(qc.vote_info.parent_id)
+        #Ledger_commit(qc.vote_info.parent_id)
         if high_qc == None : # Base case
             high_qc = qc
         elif qc.vote_info.roundx > high_qc.vote_info.roundx:
@@ -252,16 +257,29 @@ class Validator(process):
         elif qc.vote_info.roundx > high_commit_qc.vote_info.roundx:
             high_commit_qc = qc
 
-    # def Block_Tree_process_vote(vote_msg):
+    def Block_Tree_process_vote(vote_msg):
+        output("Block_Tree_process_vote....")
+        Block_Tree_process_qc(vote_msg.high_commit_qc)
+        
+        # if await(len(setof(p, received(('VoteMsg',_),
+        #                                from_=p))) > (2*f+1)):
+        #     output("2f+1 VoteMsgs received ... !")
+        #     qc = QC(vote_info=vote_msg.vote_info, author = self)
+        #     return qc
+            
+        # elif timeout(termTimeout):
+        #     output("Timed out in Block Tree process_vote")
+        #     # TODO : Implement timeout
+        # else:
+        #     return None
 
-    #     Block_Tree_process_qc(vote_msg.high_commit_qc)
-    #     if await(len(setof(p, received(('VoteMsg',_), from_=p)))) >= (2*f + 1):
-    #         qc = QC(vote_info=vote_msg.vote_info, author = self)
-    #         return qc
-    #     else:
-    #         output("Timed out in Block Tree process_vote")
-    #         # TODO : Implement timeout
-    #         return None
+        if await(len(setof(p, received(('VoteMsg',_),
+                                       from_=p))) >= 2*f+1):
+        
+            qc = QC(vote_info=vote_msg.vote_info, author = self)
+            output(f"QC Formed for {qc}")
+            return qc
+        return None
     ############ Leader Election ############ 
     def Leader_Election_update_leaders(qc):
         pass
@@ -279,6 +297,9 @@ class Validator(process):
         current_round = new_round
 
     def Pacemaker_advance_round_qc(qc):
+        if qc is None:
+            return False
+
         if qc.vote_info._round < current_round:
             return False
 
@@ -293,9 +314,9 @@ class Validator(process):
         # TODO : Implement this
         Block_Tree_process_qc(qc)
         Leader_Election_update_leaders(qc)
-        Pacemaker_advance_round_qc(qc.vote_info.roundx)
-        pass
-    
+        Pacemaker_advance_round_qc(qc)
+        
+        
     def process_proposal_msg(P):
         output("Processing process_certificate qc")
         process_certificate_qc(P.block.qc)
@@ -307,44 +328,51 @@ class Validator(process):
         
         if P.block.roundx != roundx or P.block.author != current_leader:
             return
-        # Block-Tree.execute_and_insert
+        
+        Block_Tree_execute_and_insert(P.block)  # Adding a new speculative state to ledger
+
         vote_msg = Safety_make_vote(P.block)
         if vote_msg is not None:
             send(('VoteMsg',vote_msg), to=Leader_Election_get_leader(current_round+1))
     
     def process_vote_msg(P):
-        return
-        #qc = Block_Tree_process_vote(P)
-        # if qc is not None:
-        #     process_certificate_qc(qc)
-        #     process_new_round_event(None)
+        qc = Block_Tree_process_vote(P)
+        output("Entered in process_vote_msg..")
+        if qc is not None:
+            output("Entered in process_vote_msg because is not None")
+            process_certificate_qc(qc)
+            process_new_round_event(None)
     
 
     def Block_Tree_generate_block(txns, current_round):
-        output(f"Generating Block for {txns}")
         b = Block(author=self, roundx=current_round, payload = txns, qc=high_qc, parent = None, isCommitted = False, idx=-1)
         b._replace(idx = hash(b))
-        output("Block Generated")
         return b
+    
+    def Block_Tree_execute_and_insert(b):
+        output(f"Current Block : {str(b)}")
+        if b.qc is None:
+            qc_block_id = None
+        else:
+            qc_block_id = b.qc.vote_info.idx
+
+        Ledger_speculate(qc_block_id, b.idx, b, b.payload)
+    
     
     def process_new_round_event(last_tc = None):
         if self == Leader_Election_get_leader():
-            output("Generating Block tree")
             b = Block_Tree_generate_block(mempool[0], current_round)
-            output("Block Tree Generated")
             a = mempool.pop(0)
-            output("Transaction Removed from Mempool")
             p = ProposalMsg(block=b, last_round_tc=last_tc, high_commit_qc=high_commit_qc)
-            output(f"Sending p to validators : {str(p)}")
             send(('ProposalMsg', p), to=peers)
             
     def receive(msg= ('ProposalMsg',P), from_=Leader_Election_get_leader()):
         output(f"Received Proposal Msg from {Leader_Election_get_leader()}")
         process_proposal_msg(P)
     
-    def receive(msg= ('ProposalMsg',P), from_=Leader_Election_get_leader()):
-        output(f"Received Proposal Msg from {Leader_Election_get_leader()}")
-        process_proposal_msg(P)
+    def receive(msg= ('VoteMsg', P)):
+        output(f"Received VoteMsg...")
+        process_vote_msg(P)
 
 class Client(process):
     def setup(servers, nrequests, timeout): pass
