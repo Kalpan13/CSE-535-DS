@@ -22,8 +22,8 @@ class Block(NamedTuple):
   
 class ProposalMsg(NamedTuple):
     block : Block    # Current Block
-    # last_round : int   TODO : Implement this
-    high_commit_qc : QC   # QC of Highest Committed Block
+    last_round_tc : any   # TODO : Implement this
+    high_commit_qc : QC = None # QC of Highest Committed Block
   
 class VoteMsg(NamedTuple):
     vote_info : VoteInfo
