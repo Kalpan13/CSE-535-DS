@@ -3,7 +3,7 @@ import random
 import treelib
 from treelib import Node, Tree
 from scratchpad.structures import Block, ProposalMsg, VoteInfo, VoteMsg, QC
-
+from loguru import logger
 
 class LogEntry:
     """Fictional log entries."""
@@ -31,7 +31,7 @@ class Validator(process):
         self.pending_votes = None
         self.high_qc = None
         self.high_commit_qc = None
-        self.f = 0
+        self.f = 1
         # ledger Variables
         self.genesis_block = Block(
             author = self, 
@@ -182,19 +182,19 @@ class Validator(process):
     #         return None 
     
     def Safety_make_vote(b, last_tc = None):
+        # Handling Base Cases 
+        # Case 1 : 1st Round : 1 Proposal, 0 QC
         if b.qc is None and current_round == 0:
             qc_round = -1
-            try:
-                output(f"Round info {b.roundx} : {qc_round}")
-                if Safety_safe_to_vote(b.roundx, qc_round, None):
-                    Safety_update_highest_qc_round(qc_round) # Protect QC round
-                    Safety_increase_highest_vote_round(b.roundx)
-                    vote_info = VoteInfo(idx = b.idx, roundx = b.roundx, parent_id = -1, parent_round = qc_round)
-                    vote_msg = VoteMsg(vote_info = vote_info, high_commit_qc = high_commit_qc, sender = self)
-                    output(f"Vote Msg Created : {str(vote_msg)}")
-                    return vote_msg
-            except Exception as e:
-                output(str(e))
+            logger.debug(f"Round info block round :{b.roundx} : QC round {qc_round}")
+            if Safety_safe_to_vote(b.roundx, qc_round, None):
+                Safety_update_highest_qc_round(qc_round) # Protect QC round
+                Safety_increase_highest_vote_round(b.roundx)
+                vote_info = VoteInfo(idx = b.idx, roundx = b.roundx, parent_id = hash(genesis_block), parent_round = qc_round)
+                vote_msg = VoteMsg(vote_info = vote_info, high_commit_qc = high_commit_qc, sender = self)
+                logger.(f"Vote Msg Created : {str(vote_msg)}")
+                return vote_msg
+
         else:
             qc_round = b.qc.vote_info.roundx  # qc_round of block
             if Safety_safe_to_vote(b.roundx, qc_round, None):
@@ -218,26 +218,28 @@ class Validator(process):
     
     ########### Ledger ############ 
     def Ledger_speculate(prev_block_id, block_id, block, txns):
-        output(f"Creating New Node is ledger for {str(block)}")
+        output(f"Creating New Node in ledger for {str(block.roundx)} at {self}")
         if prev_block_id is None:
             ledger_tree.create_node(str(txns), hash(block), parent=hash(genesis_block), data = block)
         else:
             ledger_tree.create_node(str(txns), hash(block), parent=prev_block_id, data = block)
         
-        output(f"Node Created...")
+        output(f"Node Created... at {self}")
+        output(f"#################################")
         output(ledger_tree.show())
         return
+    
     # def Ledger_pending_state(block_id):
     #     if ledger_tree.get_node(block_id).data.isCommitted:
     #         return None
     #     else:
     #         return 
 
-    # def Ledger_commit(block_id):
+    def Ledger_commit(block_id):
         
-    #     if not ledger_tree.get_node(block_id).data.isCommitted:
-    #         ledger_tree.get_node(block_id).data.isCommitted = True
-    #         output(f"Block : {block_id} committed by {str(self)}")
+        if not ledger_tree.get_node(block_id).data.isCommitted:
+            ledger_tree.get_node(block_id).data.isCommitted = True
+            output(f"Block : {block_id} committed by {str(self)}")
 
     def Ledger_commit_block(block_id):
         ledger_tree.get_node(block_id).data.block
@@ -246,13 +248,14 @@ class Validator(process):
     def Block_Tree_process_qc(qc):
         if qc is None:
             return
-        #Ledger_commit(qc.vote_info.parent_id)
-        if high_qc == None : # Base case
+        output(f"------> Parent ID : {qc.vote_info.parent_id}")
+        Ledger_commit(qc.vote_info.parent_id)
+        if high_qc is None : # Base case
             high_qc = qc
         elif qc.vote_info.roundx > high_qc.vote_info.roundx:
             high_qc = qc
 
-        if high_commit_qc == None : # Base case
+        if high_commit_qc is None : # Base case
             high_commit_qc = qc
         elif qc.vote_info.roundx > high_commit_qc.vote_info.roundx:
             high_commit_qc = qc
@@ -276,8 +279,10 @@ class Validator(process):
         if await(len(setof(p, received(('VoteMsg',_),
                                        from_=p))) >= 2*f+1):
         
+            output("Received Votes from 2*f + 1")
             qc = QC(vote_info=vote_msg.vote_info, author = self)
             output(f"QC Formed for {qc}")
+            reset(received)
             return qc
         return None
     ############ Leader Election ############ 
@@ -294,16 +299,20 @@ class Validator(process):
     
     ############ Pacemaker ############  
     def Pacemaker_start_timer(new_round):
+        output("Advancing to {new_round} from {current_round}")
         current_round = new_round
 
     def Pacemaker_advance_round_qc(qc):
+        output(f"Current round : {current_round} with qc : {qc}")
         if qc is None:
             return False
 
-        if qc.vote_info._round < current_round:
+        output(f"Current round : {current_round} with vote_info : {qc}")
+        
+        if qc.vote_info.roundx < current_round:
             return False
 
-        Pacemaker_start_timer(qc.vote_info.round+1)
+        Pacemaker_start_timer(qc.vote_info.roundx+1)
         last_round_tc = None
         #start_timer(qc.vote.info.round+1)  # TODO : Implement this
         return True
@@ -311,7 +320,6 @@ class Validator(process):
     
     
     def process_certificate_qc(qc):
-        # TODO : Implement this
         Block_Tree_process_qc(qc)
         Leader_Election_update_leaders(qc)
         Pacemaker_advance_round_qc(qc)
@@ -321,7 +329,6 @@ class Validator(process):
         output("Processing process_certificate qc")
         process_certificate_qc(P.block.qc)
         process_certificate_qc(P.high_commit_qc)
-        output("QC Processed....!")
         
         roundx = current_round
         current_leader = Leader_Election_get_leader(current_round)
@@ -333,24 +340,22 @@ class Validator(process):
 
         vote_msg = Safety_make_vote(P.block)
         if vote_msg is not None:
+            output(f"Sending msg to {Leader_Election_get_leader(current_round+1)}")
             send(('VoteMsg',vote_msg), to=Leader_Election_get_leader(current_round+1))
     
     def process_vote_msg(P):
         qc = Block_Tree_process_vote(P)
-        output("Entered in process_vote_msg..")
         if qc is not None:
-            output("Entered in process_vote_msg because is not None")
             process_certificate_qc(qc)
             process_new_round_event(None)
     
 
     def Block_Tree_generate_block(txns, current_round):
         b = Block(author=self, roundx=current_round, payload = txns, qc=high_qc, parent = None, isCommitted = False, idx=-1)
-        b._replace(idx = hash(b))
+        b = b._replace(idx = hash(b))
         return b
     
     def Block_Tree_execute_and_insert(b):
-        output(f"Current Block : {str(b)}")
         if b.qc is None:
             qc_block_id = None
         else:
@@ -378,7 +383,7 @@ class Client(process):
     def setup(servers, nrequests, timeout): pass
 
     def run():
-        commands = ["abc", "def", "ghi", "lmn"]
+        commands = ["abc", "def", "ghi"]
         #target = random.choice(servers)
         req = 0
 
@@ -388,27 +393,28 @@ class Client(process):
             target = servers
             output(f"Sending {req_text} to {servers}")
             send(('ClientRequest', req_text), to=servers)
-            if await(some(received(('NotLeader', _req_text, leader)),
-                          has= leader is not None)):
-                debug("Wrong server, changing to", leader)
-                target = leader
-                reset(received)
-            elif some(received(('Reply', _req_text, _))):
-                output("Request", commands[req + 1], "complete.")
-                req += 1
-            elif timeout(timeout/1000):
-                debug("Server", target, "timed out, choosing new one randomly.")
-                target = random.choice(servers)
+            req += 1
+            # if await(some(received(('NotLeader', _req_text, leader)),
+            #               has= leader is not None)):
+            #     debug("Wrong server, changing to", leader)
+            #     target = leader
+            #     reset(received)
+            # elif some(received(('Reply', _req_text, _))):
+            #     output("Request", commands[req + 1], "complete.")
+            #     req += 1
+            # elif timeout(timeout/1000):
+            #     debug("Server", target, "timed out, choosing new one randomly.")
+            #     target = random.choice(servers)
 
-        send(('Done',), to=parent())
+    #send(('Done',), to=parent())
 
 def main():
-    nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 4
+    nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 3
     nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 1
-    nrequests = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+    nrequests = int(sys.argv[3]) if len(sys.argv) > 3 else 3
     maxtimeout = int(sys.argv[4]) if len(sys.argv) > 4 else 3000
     send_failrate = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0
-
+    #config(channel="fifo")
     servers = new(Validator, num= nservers, send= send_failrate)
     setup(servers, (servers, maxtimeout))
     clients = new(Client, num= nclients)
@@ -417,4 +423,5 @@ def main():
     start(clients)
     await(each(c in clients, has=received(('Done',), from_=c)))
     output("All clients done.")
+    await()
     end(servers)
