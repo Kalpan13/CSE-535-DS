@@ -5,6 +5,10 @@ from treelib import Node, Tree
 from scratchpad.structures import Block, ProposalMsg, VoteInfo, VoteMsg, QC
 from loguru import logger
 
+#logger.add("file_1.log", format="{time} {level} {message}", level="INFO")
+
+logger.add("file_{time}.log", format ="{level} | {message}")
+
 class LogEntry:
     """Fictional log entries."""
     def __init__(self, term, client, command):
@@ -88,8 +92,12 @@ class Validator(process):
 
     def receive(msg = ("ClientRequest", txn), from_=client):
         debug(f"Client Request Received for {txn}")
-        mempool.append(txn)
-        process_new_round_event()
+        if txn == 'start' and self == Leader_Election_get_leader(current_round):
+            if await(len(setof(p, received(('VoteMsg',_),
+                                       from_=p))) >= 2*f+1):
+            process_new_round_event()
+        elif self == Leader_Election_get_leader(current_round):   
+            mempool.append(txn)
     
     def process_incoming_msgs():
         --receive
@@ -186,13 +194,13 @@ class Validator(process):
         # Case 1 : 1st Round : 1 Proposal, 0 QC
         if b.qc is None and current_round == 0:
             qc_round = -1
-            logger.debug(f"Round info block round :{b.roundx} : QC round {qc_round}")
+            logger.debug(f"source : -> {self} Round info block round :{b.roundx} : QC round {qc_round}")
             if Safety_safe_to_vote(b.roundx, qc_round, None):
                 Safety_update_highest_qc_round(qc_round) # Protect QC round
                 Safety_increase_highest_vote_round(b.roundx)
                 vote_info = VoteInfo(idx = b.idx, roundx = b.roundx, parent_id = hash(genesis_block), parent_round = qc_round)
                 vote_msg = VoteMsg(vote_info = vote_info, high_commit_qc = high_commit_qc, sender = self)
-                logger.(f"Vote Msg Created : {str(vote_msg)}")
+                logger.debug(f"source : -> {self} Vote Msg Created : {str(vote_msg)}")
                 return vote_msg
 
         else:
@@ -218,14 +226,13 @@ class Validator(process):
     
     ########### Ledger ############ 
     def Ledger_speculate(prev_block_id, block_id, block, txns):
-        output(f"Creating New Node in ledger for {str(block.roundx)} at {self}")
+        logger.debug(f"source : {self} -> Creating New Node in ledger for {str(block.roundx)} at {self}")
         if prev_block_id is None:
             ledger_tree.create_node(str(txns), hash(block), parent=hash(genesis_block), data = block)
         else:
             ledger_tree.create_node(str(txns), hash(block), parent=prev_block_id, data = block)
         
-        output(f"Node Created... at {self}")
-        output(f"#################################")
+        logger.debug(f"source : {self} -> Node Created..")
         output(ledger_tree.show())
         return
     
@@ -239,7 +246,7 @@ class Validator(process):
         
         if not ledger_tree.get_node(block_id).data.isCommitted:
             ledger_tree.get_node(block_id).data.isCommitted = True
-            output(f"Block : {block_id} committed by {str(self)}")
+            logger.debug(f"source : {self} -> Block : {block_id} committed")
 
     def Ledger_commit_block(block_id):
         ledger_tree.get_node(block_id).data.block
@@ -248,7 +255,7 @@ class Validator(process):
     def Block_Tree_process_qc(qc):
         if qc is None:
             return
-        output(f"------> Parent ID : {qc.vote_info.parent_id}")
+        logger.debug(f"source : {self} -> Parent ID : {qc.vote_info.parent_id}")
         Ledger_commit(qc.vote_info.parent_id)
         if high_qc is None : # Base case
             high_qc = qc
@@ -261,7 +268,6 @@ class Validator(process):
             high_commit_qc = qc
 
     def Block_Tree_process_vote(vote_msg):
-        output("Block_Tree_process_vote....")
         Block_Tree_process_qc(vote_msg.high_commit_qc)
         
         # if await(len(setof(p, received(('VoteMsg',_),
@@ -279,9 +285,9 @@ class Validator(process):
         if await(len(setof(p, received(('VoteMsg',_),
                                        from_=p))) >= 2*f+1):
         
-            output("Received Votes from 2*f + 1")
+            logger.debug(f"source : {self} -> Received Votes from 2*f + 1")
             qc = QC(vote_info=vote_msg.vote_info, author = self)
-            output(f"QC Formed for {qc}")
+            logger.debug(f"source : {self} -> QC Formed for {qc}")
             reset(received)
             return qc
         return None
@@ -365,7 +371,8 @@ class Validator(process):
     
     
     def process_new_round_event(last_tc = None):
-        if self == Leader_Election_get_leader():
+        if self == Leader_Election_get_leader(current_round):
+            
             b = Block_Tree_generate_block(mempool[0], current_round)
             a = mempool.pop(0)
             p = ProposalMsg(block=b, last_round_tc=last_tc, high_commit_qc=high_commit_qc)
@@ -383,12 +390,12 @@ class Client(process):
     def setup(servers, nrequests, timeout): pass
 
     def run():
-        commands = ["abc", "def", "ghi"]
+        commands = ["start","abc", "def", "ghi"]
         #target = random.choice(servers)
         req = 0
 
         debug(f"Starting Client with servers : {servers}")
-        while req < nrequests:
+        while req < len(commands):
             req_text = commands[req]
             target = servers
             output(f"Sending {req_text} to {servers}")
