@@ -4,10 +4,12 @@ import treelib
 from treelib import Node, Tree
 from scratchpad.structures import Block, ProposalMsg, VoteInfo, VoteMsg, QC
 from loguru import logger
+import nacl.utils
+from nacl.signing import SigningKey
 
 #logger.add("file_1.log", format="{time} {level} {message}", level="INFO")
 
-logger.add("file_{time}.log", format ="{level} | {message}")
+logger.add("./logs/file_{time}.log", format ="{level} | {function} | {message}")
 
 class LogEntry:
     """Fictional log entries."""
@@ -22,14 +24,13 @@ class LogEntry:
 
 class Validator(process):
         
-    def setup(peers, maxTimeout):
+    def setup(peers, maxTimeout, server_public_keys, client_public_keys, private_key):
         
         # Safety Class Variables
-        self.private_key = None # Private Key
         self.public_keys = [] # Public keys of all replicas
         self.highest_vote_round = -1 # Max of round_value voted so far
         self.highest_qc_round = -2 # Max of highQC voted so far
-
+        self.first_time = True
         # Block Tree Variables
         self.pending_block_tree = None
         self.pending_votes = None
@@ -91,22 +92,20 @@ class Validator(process):
 
 
     def receive(msg = ("ClientRequest", txn), from_=client):
+        txn = client_public_keys[client].verify(txn).decode('UTF-8')
         output(f"Client Request Received for {txn}")
-        if txn != 'start':
-            mempool.append(txn)
-        if self == Leader_Election_get_leader(current_round):
-#            if await(received(("ClientRequest",), from_=client)):
+        mempool.append(txn)
+        if self == Leader_Election_get_leader(current_round) and first_time:
+            first_time = False
             process_new_round_event()
-   
-        
+
     
     def process_incoming_msgs():
         --receive
 
     # def receive(msg =("ProposalMsg", P), from_=Leader_Election_get_leader()):
     #     process_proposal_msg(P)
-
-    
+   
     ############ Safety Module ############
     def Safety_increase_highest_vote_round(c_round):
         """ Commit not to vote in rounds < highest_vote_round
@@ -229,9 +228,9 @@ class Validator(process):
     def Ledger_speculate(prev_block_id, block_id, block, txns):
         logger.debug(f"source : {self} -> Creating New Node in ledger for {str(block.roundx)} at {self}")
         if prev_block_id is None:
-            ledger_tree.create_node(str(txns), hash(block), parent=hash(genesis_block), data = block)
+            ledger_tree.create_node(str(txns), block.id, parent=hash(genesis_block), data = block)
         else:
-            ledger_tree.create_node(str(txns), hash(block), parent=prev_block_id, data = block)
+            ledger_tree.create_node(str(txns), block.id, parent=prev_block_id, data = block)
         
         logger.debug(f"source : {self} -> Node Created..")
 
@@ -327,6 +326,7 @@ class Validator(process):
     
     
     def process_certificate_qc(qc):
+        output("Reached process certificate QC")
         Block_Tree_process_qc(qc)
         Leader_Election_update_leaders(qc)
         Pacemaker_advance_round_qc(qc)
@@ -351,7 +351,9 @@ class Validator(process):
             send(('VoteMsg',vote_msg), to=Leader_Election_get_leader(current_round+1))
     
     def process_vote_msg(P):
+        output("Reached in process_vote_msg")
         qc = Block_Tree_process_vote(P)
+        output("Block_Tree_process_vote completed")
         if qc is not None:
             process_certificate_qc(qc)
             process_new_round_event(None)
@@ -369,19 +371,25 @@ class Validator(process):
             qc_block_id = b.qc.vote_info.idx
 
         Ledger_speculate(qc_block_id, b.idx, b, b.payload)
-        mempool.remove(b.payload)
+
+        if b.payload in mempool:
+            mempool.remove(b.payload)
     
     
     def process_new_round_event(last_tc = None):
+        output("******************************",current_round,"******************************************")
         if self == Leader_Election_get_leader(current_round):
             
             b = Block_Tree_generate_block(mempool[0], current_round)
-            a = mempool.pop(0)
             p = ProposalMsg(block=b, last_round_tc=last_tc, high_commit_qc=high_commit_qc)
-            send(('ProposalMsg', p), to=peers)
+
+            send(('ProposalMsg', p,  private_key.sign(str(hash(p)).encode('UTF-8'))), to=peers)
             
-    def receive(msg= ('ProposalMsg',P), from_=Leader_Election_get_leader()):
-        output(f"Received Proposal Msg from {Leader_Election_get_leader()}")
+    def receive(msg= ('ProposalMsg',P, signed_P), from_=Leader_Election_get_leader(current_round)):
+        output(f"Received Proposal Msg from {Leader_Election_get_leader(current_round)}")
+
+        if str(hash(P)) == server_public_keys[Leader_Election_get_leader(current_round)].verify(signed_P).decode('UTF-8'):
+           output('Proposal message verified from', Leader_Election_get_leader(current_round))
         process_proposal_msg(P)
     
     def receive(msg= ('VoteMsg', P)):
@@ -389,7 +397,7 @@ class Validator(process):
         process_vote_msg(P)
 
 class Client(process):
-    def setup(servers, nrequests, timeout): pass
+    def setup(servers, nrequests, timeout, server_public_keys, private_key): pass
 
     def run():
         commands = ["start","abc", "def", "ghi"]
@@ -398,9 +406,9 @@ class Client(process):
 
         debug(f"Starting Client with servers : {servers}")
         while req < len(commands):
-            req_text = commands[req]
+            req_text = private_key.sign(commands[req].encode('UTF-8'))
             target = servers
-            output(f"Sending {req_text} to {servers}")
+            output(f"Sending {commands[req]} to {servers}")
             send(('ClientRequest', req_text), to=servers)
             req += 1
             # if await(some(received(('NotLeader', _req_text, leader)),
@@ -418,16 +426,40 @@ class Client(process):
     #send(('Done',), to=parent())
 
 def main():
+
     nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 3
     nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 1
     nrequests = int(sys.argv[3]) if len(sys.argv) > 3 else 3
     maxtimeout = int(sys.argv[4]) if len(sys.argv) > 4 else 3000
     send_failrate = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0
-    #config(channel="fifo")
+    config(channel="fifo")
+
     servers = new(Validator, num= nservers, send= send_failrate)
-    setup(servers, (servers, maxtimeout))
     clients = new(Client, num= nclients)
-    setup(clients, (list(servers), nrequests, maxtimeout))
+
+    server_public_keys = {}
+    server_private_keys = {}
+    client_public_keys = {}
+    client_private_keys = {}
+
+    for server in servers:
+        server_private_key = SigningKey.generate()
+        server_public_key = server_private_key.verify_key
+        server_public_keys[server] = server_public_key
+        server_private_keys[server] = server_private_key
+
+    for client in clients:
+        client_private_key = SigningKey.generate()
+        client_public_key = client_private_key.verify_key
+        client_public_keys[client] = client_public_key
+        client_private_keys[client] = client_private_key
+   
+    for server in servers:
+        setup(server, (servers, maxtimeout, server_public_keys,client_public_keys, server_private_keys[server]))
+
+    for client in clients:    
+        setup(client, (list(servers), nrequests, maxtimeout, server_public_keys, client_private_keys[client]))
+
     start(servers)
     start(clients)
     await(each(c in clients, has=received(('Done',), from_=c)))
