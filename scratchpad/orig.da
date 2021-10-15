@@ -251,9 +251,11 @@ class Validator(process):
         logger.critical(f"source : {self} -> trying to commit block : {block_id}")
         logger.critical(f"source : {self} -> Ledger Tree View : ")
         output(ledger_tree.show(idhidden=False, data_property='isCommitted'))
-        logger.critical(block_id)
         if not ledger_tree.get_node(block_id).data.isCommitted:
+            logger.critical(f"Trying to commit block with block id :{block_id}")
             ledger_tree.get_node(block_id).data.isCommitted = True
+            logger.critical(f"Node with given block id :{node}")
+            #isCommitted = True
             logger.debug(f"source : {self} -> Block : {block_id} committed")
 
     # def Ledger_commit_block(block_id):
