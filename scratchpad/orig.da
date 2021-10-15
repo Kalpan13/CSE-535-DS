@@ -212,7 +212,7 @@ class Validator(process):
             if Safety_safe_to_vote(b.roundx, qc_round, None):
                 Safety_update_highest_qc_round(qc_round) # Protect QC round
                 Safety_increase_highest_vote_round(b.roundx)
-                vote_info = VoteInfo(idx = b.idx, roundx = b.roundx, parent_id = b.qc.vote_info.idx, parent_round = qc_round )
+                vote_info = VoteInfo(idx = b.idx, roundx = b.roundx, parent_id = b.qc.vote_info.idx, parent_round = qc_round)
                 vote_msg = VoteMsg(vote_info = vote_info, high_commit_qc = high_commit_qc, sender = self)
                 return vote_msg
 
@@ -389,11 +389,11 @@ class Validator(process):
 
             send(('ProposalMsg', p,  private_key.sign(str(p).encode('UTF-8'))), to=peers)
             
-    def receive(msg= ('ProposalMsg',P, signed_P), from_=Leader_Election_get_leader()):
-        output(f"Received Proposal Msg from {Leader_Election_get_leader(current_round)}")
+    def receive(msg= ('ProposalMsg',P, signed_P), from_=replica):
+        output(f"Received Proposal Msg from {replica}")
         #output(f'For* {self} {str(signed_P)}')
-        if str((P)) == server_public_keys[Leader_Election_get_leader(current_round)].verify(signed_P).decode('UTF-8'):
-           output('Proposal message verified from', Leader_Election_get_leader())
+        if str((P)) == server_public_keys[replica].verify(signed_P).decode('UTF-8'):
+           output('Proposal message verified from', replica)
         process_proposal_msg(P)
     
     def receive(msg= ('VoteMsg', P)):
