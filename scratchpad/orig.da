@@ -228,9 +228,9 @@ class Validator(process):
     def Ledger_speculate(prev_block_id, block_id, block, txns):
         logger.debug(f"source : {self} -> Creating New Node in ledger for {str(block.roundx)} at {self}")
         if prev_block_id is None:
-            ledger_tree.create_node(str(txns), block.id, parent=hash(genesis_block), data = block)
+            ledger_tree.create_node(str(txns), block.idx, parent=hash(genesis_block), data = block)
         else:
-            ledger_tree.create_node(str(txns), block.id, parent=prev_block_id, data = block)
+            ledger_tree.create_node(str(txns), block.idx, parent=prev_block_id, data = block)
         
         logger.debug(f"source : {self} -> Node Created..")
 
@@ -322,9 +322,7 @@ class Validator(process):
         last_round_tc = None
         #start_timer(qc.vote.info.round+1)  # TODO : Implement this
         return True
-    
-    
-    
+        
     def process_certificate_qc(qc):
         output("Reached process certificate QC")
         Block_Tree_process_qc(qc)
@@ -383,13 +381,13 @@ class Validator(process):
             b = Block_Tree_generate_block(mempool[0], current_round)
             p = ProposalMsg(block=b, last_round_tc=last_tc, high_commit_qc=high_commit_qc)
 
-            send(('ProposalMsg', p,  private_key.sign(str(hash(p)).encode('UTF-8'))), to=peers)
+            send(('ProposalMsg', p,  private_key.sign(str(p).encode('UTF-8'))), to=peers)
             
-    def receive(msg= ('ProposalMsg',P, signed_P), from_=Leader_Election_get_leader(current_round)):
+    def receive(msg= ('ProposalMsg',P, signed_P), from_=Leader_Election_get_leader()):
         output(f"Received Proposal Msg from {Leader_Election_get_leader(current_round)}")
-
-        if str(hash(P)) == server_public_keys[Leader_Election_get_leader(current_round)].verify(signed_P).decode('UTF-8'):
-           output('Proposal message verified from', Leader_Election_get_leader(current_round))
+        #output(f'For* {self} {str(signed_P)}')
+        if str((P)) == server_public_keys[Leader_Election_get_leader(current_round)].verify(signed_P).decode('UTF-8'):
+           output('Proposal message verified from', Leader_Election_get_leader())
         process_proposal_msg(P)
     
     def receive(msg= ('VoteMsg', P)):
