@@ -91,13 +91,14 @@ class Validator(process):
 
 
     def receive(msg = ("ClientRequest", txn), from_=client):
-        debug(f"Client Request Received for {txn}")
-        if txn == 'start' and self == Leader_Election_get_leader(current_round):
-            if await(len(setof(p, received(('VoteMsg',_),
-                                       from_=p))) >= 2*f+1):
-            process_new_round_event()
-        elif self == Leader_Election_get_leader(current_round):   
+        output(f"Client Request Received for {txn}")
+        if txn != 'start':
             mempool.append(txn)
+        if self == Leader_Election_get_leader(current_round):
+#            if await(received(("ClientRequest",), from_=client)):
+            process_new_round_event()
+   
+        
     
     def process_incoming_msgs():
         --receive
@@ -233,6 +234,7 @@ class Validator(process):
             ledger_tree.create_node(str(txns), hash(block), parent=prev_block_id, data = block)
         
         logger.debug(f"source : {self} -> Node Created..")
+
         output(ledger_tree.show())
         return
     
@@ -288,7 +290,6 @@ class Validator(process):
             logger.debug(f"source : {self} -> Received Votes from 2*f + 1")
             qc = QC(vote_info=vote_msg.vote_info, author = self)
             logger.debug(f"source : {self} -> QC Formed for {qc}")
-            reset(received)
             return qc
         return None
     ############ Leader Election ############ 
@@ -368,6 +369,7 @@ class Validator(process):
             qc_block_id = b.qc.vote_info.idx
 
         Ledger_speculate(qc_block_id, b.idx, b, b.payload)
+        mempool.remove(b.payload)
     
     
     def process_new_round_event(last_tc = None):
@@ -430,5 +432,4 @@ def main():
     start(clients)
     await(each(c in clients, has=received(('Done',), from_=c)))
     output("All clients done.")
-    await()
     end(servers)
