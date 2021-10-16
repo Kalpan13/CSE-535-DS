@@ -1,5 +1,11 @@
 from typing import NamedTuple
 
+class Txn(NamedTuple):
+    sender : any
+    command : str
+    def __str__(self):
+        return f"{self.sender} : {self.command}"
+
 class VoteInfo(NamedTuple):
     idx : int  # Unique ID 
     roundx : int   # Round of VoteInfo
@@ -14,7 +20,7 @@ class QC(NamedTuple):
 class Block(NamedTuple):
     author : any 
     roundx : int
-    payload: str
+    payload: Txn
     qc: QC
     parent : any
     isCommitted : bool = False
