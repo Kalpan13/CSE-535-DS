@@ -1,7 +1,7 @@
 from typing import NamedTuple
 
 class VoteInfo(NamedTuple):
-    idx : int  # Unique ID of replica (0..n)
+    idx : int  # Unique ID 
     roundx : int   # Round of VoteInfo
     parent_id : int
     parent_round : int

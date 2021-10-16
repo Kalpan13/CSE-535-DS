@@ -24,7 +24,7 @@ class LogEntry:
 
 class Validator(process):
         
-    def setup(peers, maxTimeout, server_public_keys, client_public_keys, private_key):
+    def setup(peers, maxTimeout, server_public_keys, client_public_keys, private_key, client):
         
         # Safety Class Variables
         self.public_keys = [] # Public keys of all replicas
@@ -38,6 +38,8 @@ class Validator(process):
         self.high_commit_qc = None
         self.f = 1
         self.first_time = True
+        self.counter = 0
+        self.client = client
         # ledger Variables
         self.genesis_block = Block(
             author = self, 
@@ -65,11 +67,18 @@ class Validator(process):
         # Mempool
         self.mempool = [] # Queue to maintain client transactions      
 
+        # Program End
+        self.alive = True
+
     def run():
-        while True:
-            
+        
+        while alive:
+            #logger.info(f"source : {self} -> Current Leader {Leader_Election_get_leader(current_round)}")
             --receive   
-            pass
+        
+        if not alive:
+            return
+
         #     pass
         # #     output("Inside main loop")
         #     while len(mempool) > 0:
@@ -257,7 +266,8 @@ class Validator(process):
             ledger_tree.get_node(block_id).data = ledger_tree.get_node(block_id).data._replace(isCommitted=True)
             logger.debug(f"source : {self} -> Block : {block_id} committed")
             output(ledger_tree.show(idhidden=False, data_property='isCommitted'))
-        
+            return True
+        return False
 
     # def Ledger_commit_block(block_id):
     #     ledger_tree.get_node(block_id).data.block
@@ -269,13 +279,19 @@ class Validator(process):
         logger.debug(f"source : {self} -> Parent ID : {qc.vote_info.parent_id}")
         #ledger_tree.show(idhidden=True)
         
-        Ledger_commit(qc.vote_info.parent_id)
+        committed = Ledger_commit(qc.vote_info.parent_id)
+        if self == Leader_Election_get_leader(current_round) and committed:
+            send(('Done', ledger_tree.get_node(qc.vote_info.idx).data.payload),to=client)
+            
         if high_qc is None : # Base case
             high_qc = qc
             logger.debug(f"source : {self} -> High qc updated to {high_qc}")
         elif qc.vote_info.roundx > high_qc.vote_info.roundx:
             high_qc = qc
             logger.debug(f"source : {self} -> High qc updated to {high_qc}")
+
+        if not committed:
+            return
 
         if high_commit_qc is None : # Base case
             high_commit_qc = qc
@@ -290,7 +306,10 @@ class Validator(process):
         # TODO : Implement Timeout
         if await(len(setof(p, received(('VoteMsg',_),
                                        from_=p))) >= 2*f+1):
-        
+
+            # s = None
+            # s = received(('VoteMsg',_),from_=p)
+            # logger.critical(f"Sender Details : {s}")
             logger.debug(f"source : {self} -> Received Votes from 2*f + 1")
             reset(received)
             qc = QC(vote_info=vote_msg.vote_info, author = self)
@@ -315,15 +334,17 @@ class Validator(process):
         current_round = new_round
 
     def Pacemaker_advance_round_qc(qc):
-        output(f"Current round : {current_round} with qc : {qc}")
+        #output(f"Current round : {current_round} with qc : {qc}")
         if qc is None:
             return False
 
-        output(f"Current round : {current_round} with vote_info : {qc}")
+        #output(f"Current round : {current_round} with vote_info : {qc}")
         
         if qc.vote_info.roundx < current_round:
             return False
 
+        logger.critical(f"source : {self} -> Advancing to {current_round + 1} from {current_round}")
+        
         Pacemaker_start_timer(qc.vote_info.roundx+1)
         last_round_tc = None
         #start_timer(qc.vote.info.round+1)  # TODO : Implement this
@@ -381,14 +402,22 @@ class Validator(process):
     
     def process_new_round_event(last_tc = None):
         output("******************************",current_round,"******************************************")
+        
         if self == Leader_Election_get_leader(current_round):
-            logger.critical(f"Generating Proposal Msg for {current_round} with {mempool[0]}")
+            # if len(mempool)==0:
+            #     logger.error("Reached till No Op")
+            #     #mempool.append("No Op")
+            # else:
+            logger.critical(f"source : {self} -> Generating Proposal Msg for {current_round} with {mempool[0]}")
+                
             b = Block_Tree_generate_block(mempool[0], current_round)
             #a = mempool.pop(0)
             p = ProposalMsg(block=b, last_round_tc=last_tc, high_commit_qc=high_commit_qc)
 
             send(('ProposalMsg', p,  private_key.sign(str(p).encode('UTF-8'))), to=peers)
             
+            await(self!=Leader_Election_get_leader(current_round))
+
     def receive(msg= ('ProposalMsg',P, signed_P), from_=replica):
         output(f"Received Proposal Msg from {replica}")
         #output(f'For* {self} {str(signed_P)}')
@@ -402,31 +431,27 @@ class Validator(process):
 
 class Client(process):
     def setup(servers, nrequests, timeout, server_public_keys, private_key): pass
-
+        
     def run():
-        commands = ["start", "abc", "def", "ghi"]
+        commands = ["start", "abc", "def", "ghi", "tcp,"]
         #target = random.choice(servers)
         req = 0
-
+        ack_received = set()
         debug(f"Starting Client with servers : {servers}")
-        while req < len(commands):
-            req_text = private_key.sign(commands[req].encode('UTF-8'))
-            target = servers
-            output(f"Sending {commands[req]} to {servers}")
-            send(('ClientRequest', req_text), to=servers)
-            req += 1
-            # if await(some(received(('NotLeader', _req_text, leader)),
-            #               has= leader is not None)):
-            #     debug("Wrong server, changing to", leader)
-            #     target = leader
-            #     reset(received)
-            # elif some(received(('Reply', _req_text, _))):
-            #     output("Request", commands[req + 1], "complete.")
-            #     req += 1
-            # elif timeout(timeout/1000):
-            #     debug("Server", target, "timed out, choosing new one randomly.")
-            #     target = random.choice(servers)
-
+        try:
+            while req < len(commands):
+                req_text = private_key.sign(commands[req].encode('UTF-8'))
+                target = servers
+                output(f"Sending {commands[req]} to {servers}")
+                send(('ClientRequest', req_text), to=servers)
+                req += 1
+                # if await(some(received(('NotLeader', _req_text, leader)),
+                #               has= leader is not None)):
+                #     debug("Wrong server, changing to", leader)
+                #     target = leader
+                #     reset(received)
+        except Exception as e:
+            logger.critical(f"Exception Caught : {e}")    
     #send(('Done',), to=parent())
 
 def main():
@@ -458,7 +483,7 @@ def main():
         client_private_keys[client] = client_private_key
    
     for server in servers:
-        setup(server, (servers, maxtimeout, server_public_keys,client_public_keys, server_private_keys[server]))
+        setup(server, (servers, maxtimeout, server_public_keys,client_public_keys, server_private_keys[server], clients))
 
     for client in clients:    
         setup(client, (list(servers), nrequests, maxtimeout, server_public_keys, client_private_keys[client]))
