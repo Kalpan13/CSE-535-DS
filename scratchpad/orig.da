@@ -5,7 +5,7 @@ from treelib import Node, Tree
 from scratchpad.structures import Block, ProposalMsg, VoteInfo, VoteMsg, QC, Txn
 from loguru import logger
 import nacl.utils
-from nacl.signing import SigningKey
+from nacl.signing import SigningKey, VerifyKey
 
 #logger.add("file_1.log", format="{time} {level} {message}", level="INFO")
 
@@ -287,8 +287,8 @@ class Validator(process):
         committed = Ledger_commit(qc.vote_info.parent_id)
         if self == Leader_Election_get_leader(current_round) and committed:
             txn = ledger_tree.get_node(qc.vote_info.parent_id).data.payload
-
-            send(('Done', ledger_tree.get_node(txn.command)),to=txn.sender)
+            signed_command = private_key.sign(txn.command.encode('UTF-8'))
+            send(('Done', txn.command, signed_command),to=txn.sender)
             
         if high_qc is None : # Base case
             high_qc = qc
@@ -413,7 +413,7 @@ class Validator(process):
         if self == Leader_Election_get_leader(current_round):
             if len(mempool)==0:
                 logger.error("Reached till No Op")
-                mempool.append("No Op")
+                mempool.append(Txn(sender=None, command="No Op"))
             else:
                 logger.critical(f"source : {self} -> Generating Proposal Msg for {current_round} with {mempool[0].command}")
                 
@@ -464,13 +464,14 @@ class Client(process):
         notDone = True
         count = 0
         while notDone:
-            if await(some(received(('Done', txn),from_=p))):
-                logger.critical(f"Received Done for {txn} from {p}")
-                count+=1
-                reset(received)
-                if count==len(commands):
-                    notDone = False
-                    send(('Done',), to=parent())
+            if await(some(received(('Done', command, signed_command),from_=replica))):
+                if command == server_public_keys[replica].verify(signed_command).decode('UTF-8'):
+                    logger.critical(f"Received Done for {command} from {replica} and verified")
+                    count+=1
+                    reset(received)
+                    if count==len(commands):
+                        notDone = False
+                        send(('Done',), to=parent())
 
 def main():
 
