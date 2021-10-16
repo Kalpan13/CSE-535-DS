@@ -247,7 +247,7 @@ class Validator(process):
         
         logger.debug(f"source : {self} -> Node Created..")
 
-        output(ledger_tree.show(idhidden=False, data_property='isCommitted'))
+        #output(ledger_tree.show(idhidden=False, data_property='payload'))
         
         return
     
@@ -259,13 +259,15 @@ class Validator(process):
 
     def Ledger_commit(block_id):
         logger.critical(f"source : {self} -> Ledger Tree View : ")
+
         if not ledger_tree.get_node(block_id).data.isCommitted:
             logger.critical(f"source : {self} -> trying to commit block : {block_id}")    
             logger.critical(f"Node with given block id :{ledger_tree.get_node(block_id).data.isCommitted}")
             #isCommitted = True
             ledger_tree.get_node(block_id).data = ledger_tree.get_node(block_id).data._replace(isCommitted=True)
             logger.debug(f"source : {self} -> Block : {block_id} committed")
-            output(ledger_tree.show(idhidden=False, data_property='isCommitted'))
+            output(ledger_tree.show(idhidden=False, data_property='payload'))
+    
             return True
         return False
 
@@ -281,7 +283,7 @@ class Validator(process):
         
         committed = Ledger_commit(qc.vote_info.parent_id)
         if self == Leader_Election_get_leader(current_round) and committed:
-            send(('Done', ledger_tree.get_node(qc.vote_info.idx).data.payload),to=client)
+            send(('Done', ledger_tree.get_node(qc.vote_info.parent_id).data.payload),to=client)
             
         if high_qc is None : # Base case
             high_qc = qc
@@ -404,11 +406,11 @@ class Validator(process):
         output("******************************",current_round,"******************************************")
         
         if self == Leader_Election_get_leader(current_round):
-            # if len(mempool)==0:
-            #     logger.error("Reached till No Op")
-            #     #mempool.append("No Op")
-            # else:
-            logger.critical(f"source : {self} -> Generating Proposal Msg for {current_round} with {mempool[0]}")
+            if len(mempool)==0:
+                logger.error("Reached till No Op")
+                mempool.append("No Op")
+            else:
+                logger.critical(f"source : {self} -> Generating Proposal Msg for {current_round} with {mempool[0]}")
                 
             b = Block_Tree_generate_block(mempool[0], current_round)
             #a = mempool.pop(0)
@@ -433,7 +435,7 @@ class Client(process):
     def setup(servers, nrequests, timeout, server_public_keys, private_key): pass
         
     def run():
-        commands = ["start", "abc", "def", "ghi", "tcp,"]
+        commands = ["start", "abc", "def", "ghi", "tcp"]
         #target = random.choice(servers)
         req = 0
         ack_received = set()
@@ -444,15 +446,24 @@ class Client(process):
                 target = servers
                 output(f"Sending {commands[req]} to {servers}")
                 send(('ClientRequest', req_text), to=servers)
-                req += 1
-                # if await(some(received(('NotLeader', _req_text, leader)),
-                #               has= leader is not None)):
+                # if await(some(received(('NotLeader', _req, leader)),
+                #           has= leader is not None)):
                 #     debug("Wrong server, changing to", leader)
                 #     target = leader
                 #     reset(received)
+                req+=1
         except Exception as e:
-            logger.critical(f"Exception Caught : {e}")    
-    #send(('Done',), to=parent())
+            logger.critical(f"Exception caught : {e}")        
+        notDone = True
+        count = 0
+        while notDone:
+            if await(some(received(('Done', txn),from_=p))):
+                logger.critical(f"Received Done for {txn} from {p}")
+                count+=1
+                reset(received)
+                if count==len(commands):
+                    notDone = False
+                    send(('Done',), to=parent())
 
 def main():
 
