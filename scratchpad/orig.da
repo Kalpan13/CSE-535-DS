@@ -1,15 +1,11 @@
 import sys
-import random
-import treelib
-from treelib import Node, Tree
+from treelib import Tree
 from scratchpad.structures import Block, ProposalMsg, VoteInfo, VoteMsg, QC, Txn
 from loguru import logger
-import nacl.utils
-from nacl.signing import SigningKey, VerifyKey
+from nacl.signing import SigningKey
 
-#logger.add("file_1.log", format="{time} {level} {message}", level="INFO")
+logger.add("./logs/file_{time}.log", format="{level} | {message}")
 
-logger.add("./logs/file_{time}.log", format ="{level} | {message}")
 
 class LogEntry:
     """Fictional log entries."""
@@ -22,15 +18,15 @@ class LogEntry:
         sl = ['LogEntry', str(self.term), str(self.client), str(self.command)]
         return ':'.join(sl)
 
+
 class Validator(process):
-        
     def setup(peers, maxTimeout, server_public_keys, client_public_keys, private_key, client):
-        
+
         # Safety Class Variables
-        self.public_keys = [] # Public keys of all replicas
-        self.highest_vote_round = -1 # Max of round_value voted so far
-        self.highest_qc_round = -2 # Max of highQC voted so far
+        self.highest_vote_round = -1   # Max of round_value voted so far
+        self.highest_qc_round = -2     # Max of highQC voted so far
         self.first_time = True
+
         # Block Tree Variables
         self.pending_block_tree = None
         self.pending_votes = None
@@ -40,42 +36,44 @@ class Validator(process):
         self.first_time = True
         self.counter = 0
         self.client = client
+
         # ledger Variables
         self.genesis_block = Block(
-            author = self, 
-            roundx = -1, 
-            payload = "No Op", 
-            qc = None, 
-            parent = None, 
-            isCommitted = True,
-            idx = -1)    # block_id 
-        
+            author=self,
+            roundx=-1,
+            payload="No Op",
+            qc=None,
+            parent=None,
+            isCommitted=True,
+            idx=-1)         # block_id
+        self.pending_block_tree = Tree()
+        self.pending_block_tree.create_node("genesis_block", -1, data=self.genesis_block)
+
         self.ledger_tree = Tree()
-        self.ledger_tree.create_node("genesis_block",-1, data = self.genesis_block)
+        self.ledger_tree.create_node("genesis_block", -1, data=self.genesis_block)
 
         # Leader Election Variables
-        self.validators = [] # The list of current validators
-        self.window_size = 0 # A parameter for the leader reputation algorithm
-        self.exclude_size = 0 # Between f and 2f, no. of excluded authors of last committed blocks
-        self.reputation_leaders = {} # Map from round numbers to leaders elected due to the reputation scheme
+        self.validators = []   # The list of current validators
+        self.window_size = 0   # A parameter for the leader reputation algorithm
+        self.exclude_size = 0   # Between f and 2f, no. of excluded authors of last committed blocks
+        self.reputation_leaders = {}   # Map from round numbers to leaders elected due to the reputation scheme
         self.peers = peers
-        
+
         # Pacemaker Variables
         self.current_round = 0
         self.last_round_tc = None
 
         # Mempool
-        self.mempool = [] # Queue to maintain client transactions      
+        self.mempool = []   # Queue to maintain client transactions
 
         # Program End
         self.alive = True
 
     def run():
-        
         while alive:
             #logger.info(f"source : {self} -> Current Leader {Leader_Election_get_leader(current_round)}")
-            --receive   
-        
+            --receive
+
         if not alive:
             return
 
@@ -87,7 +85,6 @@ class Validator(process):
         #             round_timeout = 0
         #         else:
         #             round_timeout = random.randint(int(maxTimeout/2), maxTimeout) / 1000
-                
         #         validator_term(round_timeout)
     
     # def process_new_round_event():
@@ -102,7 +99,7 @@ class Validator(process):
 
 
     def receive(msg = ("ClientRequest", txn_signed, txn_orig), from_=client):
-        
+
         txn = client_public_keys[client].verify(txn_signed).decode('UTF-8')
         if str(txn_orig)==txn:
             logger.debug(f"Client Request Received for {txn} and Verified...!")
@@ -110,15 +107,12 @@ class Validator(process):
             if first_time and self == Leader_Election_get_leader(current_round):
                 first_time = False    
                 process_new_round_event()
-        
-        
-    
     def process_incoming_msgs():
         --receive
 
     # def receive(msg =("ProposalMsg", P), from_=Leader_Election_get_leader()):
     #     process_proposal_msg(P)
-   
+
     ############ Safety Module ############
     def Safety_increase_highest_vote_round(c_round):
         """ Commit not to vote in rounds < highest_vote_round
@@ -128,13 +122,13 @@ class Validator(process):
         highest_vote_round = max(c_round,highest_vote_round)
 
     def Safety_update_highest_qc_round(qc_round) :
-        """ Update the highest qc round 
+        """ Update the highest qc round
 
         Args:
-            qc_round (int): 
+            qc_round (int):
         """
         highest_qc_round = max(qc_round, highest_qc_round)
-    
+
     def Safety_consecutive(block_round, round):
         """
         To check if `block_round` is the next round of `round` or not 
@@ -239,6 +233,17 @@ class Validator(process):
     #     # TODO : Implement this : Validate with available Public keys 
     #     return True
     
+    ########### pending tree ############ 
+    def pending_block_tree_prune(block_id):
+        for sibling in pending_block_tree.siblings(block_id):
+            pending_block_tree.remove_node(sibling.identifier)
+
+    def pending_block_tree_add(b):
+        if b.qc is None:
+            pending_block_tree.create_node(str(b.payload), identifier=b.idx, parent=-1, data = b)
+        else:
+            pending_block_tree.create_node(str(b.payload), identifier=b.idx, parent=b.qc.vote_info.idx, data = b)
+    
     ########### Ledger ############ 
     def Ledger_speculate(prev_block_id, block_id, block, txns):
         logger.debug(f"source : {self} -> Creating New Node in ledger for {str(block.roundx)} at {self}")
@@ -285,6 +290,8 @@ class Validator(process):
         #ledger_tree.show(idhidden=True)
         
         committed = Ledger_commit(qc.vote_info.parent_id)
+        pending_block_tree_prune(qc.vote_info.parent_id)
+
         if self == Leader_Election_get_leader(current_round) and committed:
             txn = ledger_tree.get_node(qc.vote_info.parent_id).data.payload
             signed_command = private_key.sign(txn.command.encode('UTF-8'))
@@ -376,7 +383,7 @@ class Validator(process):
             return
         
         Block_Tree_execute_and_insert(P.block)  # Adding a new speculative state to ledger
-
+        pending_block_tree_add(P.block)
         vote_msg = Safety_make_vote(P.block)
         if vote_msg is not None:
             logger.debug(f"Sending msg to {Leader_Election_get_leader(current_round+1)}")
