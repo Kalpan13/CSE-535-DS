@@ -265,8 +265,8 @@ class Validator(process):
     #         return 
 
     def Ledger_commit(block_id):
-        logger.critical(f"source : {self} -> Ledger Tree View : ")
-
+        logger.critical(f"source : {self} -> Ledger : Fetching block : {block_id}")
+        logger.critical(f"source : {self} -> Get Node : {ledger_tree.get_node(block_id)}")
         if not ledger_tree.get_node(block_id).data.isCommitted:
             logger.critical(f"source : {self} -> trying to commit block : {block_id}")    
             logger.critical(f"Node with given block id :{ledger_tree.get_node(block_id).data.isCommitted}")
@@ -274,7 +274,7 @@ class Validator(process):
             ledger_tree.get_node(block_id).data = ledger_tree.get_node(block_id).data._replace(isCommitted=True)
             logger.debug(f"source : {self} -> Block : {block_id} committed")
             print(f"Current Replica : {self}")
-            logger.debug(ledger_tree.show(idhidden=False, data_property='payload'))
+            ledger_tree.show(idhidden=False, data_property='payload')
     
             return True
         return False
@@ -436,7 +436,7 @@ class Validator(process):
         logger.debug(f"Received Proposal Msg from {replica}")
         #logger.debug(f'For* {self} {str(signed_P)}')
         if str((P)) == server_public_keys[replica].verify(signed_P).decode('UTF-8'):
-           logger.debug(f"Proposal message verified from {replica}")
+           logger.debug(f"source : {self} -> Proposal message verified from {replica}")
         process_proposal_msg(P)
     
     def receive(msg= ('VoteMsg', P)):
@@ -483,7 +483,7 @@ class Client(process):
 def main():
 
     nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 5
-    nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 2
+    nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 3
     nrequests = int(sys.argv[3]) if len(sys.argv) > 3 else 3
     maxtimeout = int(sys.argv[4]) if len(sys.argv) > 4 else 3000
     send_failrate = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0
