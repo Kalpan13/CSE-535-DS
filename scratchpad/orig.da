@@ -102,7 +102,7 @@ class Validator(process):
 
         txn = client_public_keys[client].verify(txn_signed).decode('UTF-8')
         if str(txn_orig)==txn:
-            logger.debug(f"Client Request Received for {txn} and Verified...!")
+            logger.debug(f"source : {self} -> Client Request Received for {txn} and Verified...!")
             mempool.append(txn_orig)
             if first_time and self == Leader_Election_get_leader(current_round):
                 first_time = False    
@@ -254,8 +254,9 @@ class Validator(process):
         
         logger.debug(f"source : {self} -> Node Created..")
 
-        #output(ledger_tree.show(idhidden=False, data_property='payload'))
-        
+        ledger_tree.show(idhidden=False, data_property='payload')
+        output(ledger_tree.show(idhidden=False, data_property='payload'))
+        print(ledger_tree.show(idhidden=False, data_property='payload'))
         return
     
     # def Ledger_pending_state(block_id):
@@ -321,14 +322,13 @@ class Validator(process):
         if await(len(setof(p, received(('VoteMsg',_),
                                        from_=p))) >= 2*f+1):
 
-            # s = None
-            # s = received(('VoteMsg',_),from_=p)
-            # logger.critical(f"Sender Details : {s}")
-            logger.debug(f"source : {self} -> Received Votes from 2*f + 1")
-            reset(received)
-            qc = QC(vote_info=vote_msg.vote_info, author = self)
-            logger.debug(f"source : {self} -> QC Formed for {qc} broadcasting to all")
-            return qc
+            if self != Leader_Election_get_leader(current_round):
+                
+                logger.debug(f"source : {self} -> Received Votes from 2*f + 1")
+                reset(received)
+                qc = QC(vote_info=vote_msg.vote_info, author = self)
+                logger.debug(f"source : {self} -> QC Formed for {qc} broadcasting to all")
+                return qc
         return None
     ############ Leader Election ############ 
     def Leader_Election_update_leaders(qc):
@@ -416,7 +416,7 @@ class Validator(process):
     
     def process_new_round_event(last_tc = None):
         logger.debug("******************************",current_round,"******************************************")
-        
+
         if self == Leader_Election_get_leader(current_round):
             if len(mempool)==0:
                 logger.error("Reached till No Op")
@@ -433,6 +433,7 @@ class Validator(process):
             await(self!=Leader_Election_get_leader(current_round))
 
     def receive(msg= ('ProposalMsg',P, signed_P), from_=replica):
+
         logger.debug(f"Received Proposal Msg from {replica}")
         #logger.debug(f'For* {self} {str(signed_P)}')
         if str((P)) == server_public_keys[replica].verify(signed_P).decode('UTF-8'):
