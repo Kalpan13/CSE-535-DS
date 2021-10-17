@@ -32,7 +32,7 @@ class Validator(process):
         self.pending_votes = None
         self.high_qc = None
         self.high_commit_qc = None
-        self.f = 2
+        self.f = 0
         self.first_time = True
         self.counter = 0
         self.client = client
@@ -67,14 +67,22 @@ class Validator(process):
         self.mempool = []   # Queue to maintain client transactions
 
         # Program End
-        self.alive = True
+        self.run_done = False
 
     def run():
-        while alive:
+        
+        while not run_done:
+            run_done = False
+            #--receive
+            timer_duration = Pacemaker_get_round_timer(current_round)
+            if await run_done:
+                pass
+            elif timeout(timer_duration): 
+                Pacemaker_local_timeout_round()
             #logger.info(f"source : {self} -> Current Leader {Leader_Election_get_leader(current_round)}")
-            --receive
+            
 
-        if not alive:
+        if run_done:
             return
 
         #     pass
@@ -102,7 +110,7 @@ class Validator(process):
 
         txn = client_public_keys[client].verify(txn_signed).decode('UTF-8')
         if str(txn_orig)==txn:
-            logger.debug(f"Client Request Received for {txn} and Verified...!")
+            logger.debug(f"source : {self}  -> Client Request Received for {txn} and Verified...!")
             mempool.append(txn_orig)
             if first_time and self == Leader_Election_get_leader(current_round):
                 first_time = False    
@@ -344,7 +352,8 @@ class Validator(process):
     
     ############ Pacemaker ############  
     def Pacemaker_start_timer(new_round):
-        logger.debug(f"Advancing to {new_round} from {current_round}")
+        run_done = True
+        logger.debug(f"Advancing to {new_round} from {current_round} : run_done {run_done}")
         current_round = new_round
 
     def Pacemaker_advance_round_qc(qc):
@@ -364,6 +373,12 @@ class Validator(process):
         #start_timer(qc.vote.info.round+1)  # TODO : Implement this
         return True
     
+    def Pacemaker_get_round_timer(current_round):
+        return 650
+
+    def Pacemaker_local_timeout_round():
+        logger.critical("Processing Local Timeout...")
+
     def process_certificate_qc(qc):
         logger.debug("Reached process certificate QC")
         Block_Tree_process_qc(qc)
@@ -434,6 +449,7 @@ class Validator(process):
 
     def receive(msg= ('ProposalMsg',P, signed_P), from_=replica):
         logger.debug(f"Received Proposal Msg from {replica}")
+        run_done = True
         #logger.debug(f'For* {self} {str(signed_P)}')
         if str((P)) == server_public_keys[replica].verify(signed_P).decode('UTF-8'):
            logger.debug(f"source : {self} -> Proposal message verified from {replica}")
@@ -482,8 +498,8 @@ class Client(process):
 
 def main():
 
-    nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 5
-    nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 3
+    nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 3
+    nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 1
     nrequests = int(sys.argv[3]) if len(sys.argv) > 3 else 3
     maxtimeout = int(sys.argv[4]) if len(sys.argv) > 4 else 3000
     send_failrate = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0
