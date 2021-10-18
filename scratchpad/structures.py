@@ -35,23 +35,3 @@ class VoteMsg(NamedTuple):
     vote_info : VoteInfo
     high_commit_qc : QC
     sender : any
-
-class TimeoutInfo(NamedTuple):
-    roundx : int
-    high_qc : QC
-    sender : any
-
-class TC(NamedTuple):
-    roundx : int = None            # All timeout messages that form TC have the same round
-    tmo_high_qc_rounds: list = []  # A vector of 2f + 1 high qc round numbers of timeout messages that form TC
-    #tmo signatures; // A vector of 2f + 1 validator signatures on (round, respective high qc round)
-
-class TimeoutMsg(NamedTuple):
-    tmo_info : TimeoutInfo  # TimeoutInfo for some round with a high qc
-    last_round_tc : TC = None     # TC for tmo info.round − 1 if tmo info.high qc.round 6= tmo info.round − 1, else ⊥
-    high_commit_qc : QC = None    # QC to synchronize on committed blocks
-
-class pendingTOBlock(NamedTuple):
-    senders : set = set()
-    roundx : int = 0
-    tmo_info : list = []
