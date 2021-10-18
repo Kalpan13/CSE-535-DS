@@ -32,7 +32,7 @@ class Validator(process):
         self.pending_votes = None
         self.high_qc = None
         self.high_commit_qc = None
-        self.f = 0
+        self.f = 2
         self.first_time = True
         self.counter = 0
         self.client = client
@@ -319,7 +319,7 @@ class Validator(process):
         Block_Tree_process_qc(vote_msg.high_commit_qc)
         
         # TODO : Implement Timeout
-        if await(len(setof(p, received(('VoteMsg',_,_),
+        if await(len(setof(p, received(('VoteMsg',_),
                                        from_=p))) >= 2*f+1):
 
             if self != Leader_Election_get_leader(current_round):
@@ -387,8 +387,7 @@ class Validator(process):
         vote_msg = Safety_make_vote(P.block)
         if vote_msg is not None:
             logger.debug(f"Sending msg to {Leader_Election_get_leader(current_round+1)}")
-            signed_vote_msg = private_key.sign(str(vote_msg).encode('UTF-8'))
-            send(('VoteMsg',vote_msg, signed_vote_msg), to=Leader_Election_get_leader(current_round+1))
+            send(('VoteMsg',vote_msg), to=Leader_Election_get_leader(current_round+1))
     
     def process_vote_msg(P):
         logger.debug("Reached in process_vote_msg")
@@ -441,10 +440,9 @@ class Validator(process):
            logger.debug(f"Proposal message verified from {replica}")
         process_proposal_msg(P)
     
-    def receive(msg= ('VoteMsg', V, signed_V),from_=replica):
-        if str((V)) == server_public_keys[replica].verify(signed_V).decode('UTF-8'):
-           logger.debug(f"Vote message verified from {replica}")        
-        process_vote_msg(V)
+    def receive(msg= ('VoteMsg', P)):
+        logger.debug(f"Received VoteMsg...")
+        process_vote_msg(P)
 
 class Client(process):
     def setup(servers, nrequests, timeout, server_public_keys, private_key): pass
