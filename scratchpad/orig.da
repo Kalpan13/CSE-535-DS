@@ -71,7 +71,7 @@ class Validator(process):
                 logger.debug(f"Found Timeout Msg")
                 reset(received)    
                 pass
-            elif timeout(3):
+            elif timeout(10):
                 run_done = True
                 logger.critical(f"source : {self} -> ...Round Timed out")
                 Pacemaker_local_timeout_round()
@@ -505,7 +505,7 @@ class Validator(process):
                 send(('ProposalMsg', p,  private_key.sign(str(p).encode('UTF-8'))), to=peers)
                 #if await(self!=Leader_Election_get_leader(current_round))
         
-            elif timeout(20):
+            elif timeout(5):
                 send(('Done',), to=parent())
                 # mempool.append(Txn(sender=None, command="No Op"))
                 # b = Block_Tree_generate_block(mempool[0], current_round)
@@ -596,7 +596,7 @@ class Client(process):
 
 def main():
 
-    nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 7
+    nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 6
     nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 1
     nrequests = int(sys.argv[3]) if len(sys.argv) > 3 else 3
     maxtimeout = int(sys.argv[4]) if len(sys.argv) > 4 else 3
