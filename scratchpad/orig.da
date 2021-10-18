@@ -4,10 +4,9 @@ from scratchpad.structures import Block, ProposalMsg, VoteInfo, VoteMsg, QC, Txn
 from loguru import logger
 from nacl.signing import SigningKey
 
-logger.add("./logs/file_{time}.log", format="{time} | {level} | {message}")
 
 class Validator(process):
-    def setup(peers, maxTimeout, server_public_keys, client_public_keys, private_key, client, leaderFail):
+    def setup(peers, server_public_keys, client_public_keys, private_key, client, leaderFail, round_timeout=10, end_timeout=5):
 
         # Safety Class Variables
         self.highest_vote_round = -1   # Max of round_value voted so far
@@ -24,7 +23,7 @@ class Validator(process):
         self.counter = 0
         self.client = client
         self.process_new_round_event_called = {}
-        
+
         # ledger Variables
         self.genesis_block = Block(
             author=self,
@@ -34,7 +33,7 @@ class Validator(process):
             parent=None,
             isCommitted=True,
             idx=-1)         # block_id
-        
+
         self.pending_block_tree = Tree()
         self.pending_block_tree.create_node("genesis_block", -1, data=self.genesis_block)
 
@@ -57,8 +56,9 @@ class Validator(process):
 
         # Program End
         self.run_done = False
-        self.timer_duration = 10
+        self.round_timeout = 10
         self.leaderFail = leaderFail
+        self.end_timeout = end_timeout
 
     def run():
         while True:
@@ -69,12 +69,11 @@ class Validator(process):
             elif await(some(received(('TimeoutMsg',_)))):
                 reset(received)    
                 pass
-            elif timeout(10):
+            elif timeout(round_timeout):
                 run_done = True
                 logger.info(f"source : {self} -> Processing new round event..")
                 Pacemaker_local_timeout_round()
-                timer_duration = Pacemaker_get_round_timer(current_round)
-            
+
             timer_duration = Pacemaker_get_round_timer(current_round)
 
     def receive(msg=('TimeoutMsg', T), from_=replica):
@@ -83,19 +82,37 @@ class Validator(process):
         logger.info(f"source : {self} -> Timeout msg received from {replica}")
         process_timeout_msg(T)
 
-    def receive(msg = ("ClientRequest", txn_signed, txn_orig), from_=client):
+    def receive(msg=("ClientRequest", txn_signed, txn_orig), from_=client):
         """Receiver for Client Request Handler. Calls process_new_round_event()
         """
         txn = client_public_keys[client].verify(txn_signed).decode('UTF-8')
-        if str(txn_orig)==txn:
+        if str(txn_orig) == txn:
             logger.info(f"source : {self} -> Client Request Received for {txn} and Verified...!")
             mempool.append(txn_orig)
             if first_time and self == Leader_Election_get_leader(current_round):
                 first_time = False
                 process_new_round_event()
-            
+
+    def receive(msg=('ProposalMsg',P, signed_P), from_=replica):
+        """Proposal Msg Receive Handler
+        """
+        logger.info(f"source : {self} -> Received Proposal Msg from {replica} : Msg : {P}")
+        run_done = True
+        # Verify Signate
+        if str((P)) == server_public_keys[replica].verify(signed_P).decode('UTF-8'):
+           logger.info(f"source : {self} -> Proposal message verified from {replica}")
+        process_proposal_msg(P)
+        return 
+
+    def receive(msg=('VoteMsg', P), from_=replica):
+        """VoteMsg Receive Handler
+        """
+        logger.info(f"source {self} -> Received VoteMsg from {replica}")
+        process_vote_msg(P)
+        return 
+
     def process_timeout_msg(M):
-        """To process incoming "local timeout
+        """To process incoming `local timeout`
         Args:
             M (TimeoutMsg): Incoming Timeout msg
         """
@@ -307,12 +324,14 @@ class Validator(process):
             ledger_tree.create_node(str(txns), identifier=block.idx, parent=-1, data = block)
         else:
             ledger_tree.create_node(str(txns), identifier=block.idx, parent=prev_block_id, data = block)
-        
-        
-        logger.info(f"source : {self} -> Tree View : {ledger_tree.to_json()}")
-        output(ledger_tree.show(idhidden=False, data_property='payload'))
         return
-    
+
+    def store_to_persistent(data):
+        file_pointer = open(f"./ledger/{str(self)}_ledger.txt", "a")  # append mode
+        file_pointer.write(data+"\n")
+        file_pointer.close()
+        return
+
     def Ledger_commit(block_id):
         """Commits the given block_id
 
@@ -322,15 +341,14 @@ class Validator(process):
         logger.info(f"source : {self} -> Get Node : {ledger_tree.get_node(block_id)}")
         try:
             if not ledger_tree.get_node(block_id).data.isCommitted:
-                logger.info(f"source : {self} -> trying to commit block : {block_id}")    
-                logger.info(f"Node with given block id :{ledger_tree.get_node(block_id).data.isCommitted}")
-                #isCommitted = True
-                ledger_tree.get_node(block_id).data = ledger_tree.get_node(block_id).data._replace(isCommitted=True)
-                logger.info(f"source : {self} -> Block : {block_id} committed")
-                print(f"Current Replica : {self}")
-                ledger_tree.show(idhidden=False, data_property='payload')
                 for sibling in ledger_tree.siblings(block_id):
                     ledger_tree.remove_node(sibling.identifier)
+                
+                ledger_tree.get_node(block_id).data = \
+                ledger_tree.get_node(block_id).data._replace(isCommitted=True)
+                store_to_persistent(ledger_tree.get_node(block_id).data.payload.command)
+                logger.info(f"source : {self} -> Block : {block_id} committed")
+                ledger_tree.show(idhidden=False, data_property='payload')
                 return True
             return False
         except Exception as e:
@@ -413,39 +431,33 @@ class Validator(process):
     
     ############ Pacemaker ############  
     def Pacemaker_start_timer(new_round):
-        logger.info(f"source : {self} -> Advancing to {new_round} from {current_round} : run_done {run_done}")
         current_round = new_round
         run_done = False
         
     def Pacemaker_advance_round_qc(qc):
-        """Advance current round to current_round + 1
+        """Advance current round to current_round + 1 in case of QC
 
         Args:
             qc (QC): 
 
         """
-        output(f"Current round : {current_round} with qc : {qc}")
+        logger.info(f"Current round : {current_round} with qc : {qc}")
         if qc is None:
             return False
 
         if qc.vote_info.roundx < current_round:
             return False
 
-        logger.info(f"source : {self} -> Advancing to {current_round + 1} from {current_round}")
         Pacemaker_start_timer(qc.vote_info.roundx+1)
         last_round_tc = None
         return True
 
     def Pacemaker_advance_round_tc(tc):
-        """Advance round in case TC is formed
+        """Advance current round to current_round + 1 in case of TC
 
         Args:
-            tc ([type]): [description]
-
-        Returns:
-            [type]: [description]
+            tc (TC):
         """
-        logger.info(f"Current tc : {tc}")
         if tc is None or tc.roundx < current_round:
             return False
         last_round_tc = tc
@@ -455,6 +467,14 @@ class Validator(process):
         return True
 
     def Pacemaker_process_remote_timeout(T):
+        """Process Remote Timeout Msg and create TC
+
+        Args:
+            T (Timeout Info): Timeout Info received from peer
+
+        Returns:
+            TC: TC if formed else None
+        """
         tmo_info = T.tmo_info
         if tmo_info.roundx < current_round:
             return None
@@ -467,34 +487,42 @@ class Validator(process):
             pending_to_block_tmo_info.append(tmo_info)
             pending_to_block = pending_to_block._replace(tmo_info=pending_to_block_tmo_info)
             pending_timeouts[tmo_info.roundx] = pending_to_block
-
-            logger.info(f"source : {self} -> Pending Timeouts {pending_timeouts}")
-
+            
         if len(pending_timeouts[tmo_info.roundx].senders) >= (2*f+1):
             tmo_high_qc_rounds = [t.high_qc.vote_info.roundx if t.high_qc is not None else None for t in pending_timeouts[tmo_info.roundx].tmo_info]
             tc = TC(roundx=tmo_info.roundx, tmo_high_qc_rounds = tmo_high_qc_rounds)
-            logger.info(f"sender : {self} -> TC genrated : {tc}")
+            logger.info(f"sender : {self} -> TC Formed : {tc}")
             return tc
 
     def Pacemaker_get_round_timer(current_round):
-        return 650
+        """Returns Timeout value of round
+
+        Args:
+            current_round (int): 
+
+        Returns:
+            int : 
+        """
+        return round_timeout
 
     def Pacemaker_local_timeout_round():
+        """Local timeout round in case of local timeout. Broadcasts TimeoutMsg
+        """
         timeout_info = Safety_make_timeout(current_round, high_qc, last_round_tc)
-        logger.info(f"sender :{self} -> Timeout Info Created : {timeout_info}")
         timeout_msg = TimeoutMsg(tmo_info=timeout_info,last_round_tc=last_round_tc,high_commit_qc=high_commit_qc)
-        logger.info(f"sender :{self} -> Broadcasting Timeout msg : {timeout_msg}")
         send(('TimeoutMsg', timeout_msg), to=peers)
         
     def process_certificate_qc(qc):
-        logger.info(f"source : {self} -> Reached process certificate QC : {qc}")
         Block_Tree_process_qc(qc)
         Leader_Election_update_leaders(qc)
         if Pacemaker_advance_round_qc(qc):
             logger.info(f"source : {self} -> Advance Round Completed. New Round : {current_round}")
         
     def process_proposal_msg(P):
-        logger.info("Processing process_certificate qc")
+        """Process Proposal Msg from Leader
+        Args:
+            P (ProposalMsg): Proposal Msg from Possible Leader
+        """
         process_certificate_qc(P.block.qc)
         process_certificate_qc(P.high_commit_qc)
         Pacemaker_advance_round_tc(P.last_round_tc)
@@ -506,7 +534,7 @@ class Validator(process):
         pending_block_tree_add(P.block)
         vote_msg = Safety_make_vote(P.block,P.last_round_tc)
         if vote_msg is not None:
-            logger.info(f"source : {self} -> Sending msg to {Leader_Election_get_leader(current_round+1)}")
+            logger.info(f"source : {self} -> Sending Votemsg to {Leader_Election_get_leader(current_round+1)}")
             send(('VoteMsg',vote_msg), to=Leader_Election_get_leader(current_round+1))
             return
         
@@ -515,9 +543,17 @@ class Validator(process):
         if qc is not None:
             process_certificate_qc(qc)
             process_new_round_event(None)
-    
 
     def Block_Tree_generate_block(txns, current_round):
+        """Create a block for Ledger and Pending Tree
+
+        Args:
+            txns (Txn): Txn
+            current_round (int): current_round
+
+        Returns:
+            Block : 
+        """
         b = Block(author=self, roundx=current_round, payload = txns, qc=high_qc, parent = None, isCommitted = False, idx=-1)
         b = b._replace(idx = hash(b))
         return b
@@ -532,13 +568,13 @@ class Validator(process):
         if b.payload in mempool:
             mempool.remove(b.payload)
     
-    
     def process_new_round_event(last_tc = None):
-        logger.info(f"******************************{current_round}******************************************")
-        logger.info(f"Leader : {Leader_Election_get_leader(current_round)}")
-            
+        """
+        Process the new round
+        """ 
         if self == Leader_Election_get_leader(current_round) and not leaderFail:
-            logger.info(f"Mempool size : {len(mempool)}")
+            if leaderFail:
+                leaderFail = False
             if await(len(mempool)!=0):
                 b = Block_Tree_generate_block(mempool[0], current_round)
                 logger.info(f"source : {self} -> Generating Proposal Msg for {current_round} with {mempool[0].command}")
@@ -546,98 +582,73 @@ class Validator(process):
                 logger.info(f"source : {self} -> Generated Proposal : {p} for {current_round} with {mempool[0].command}")
                 
                 send(('ProposalMsg', p,  private_key.sign(str(p).encode('UTF-8'))), to=peers)
-                #if await(self!=Leader_Election_get_leader(current_round))
-        
-            elif timeout(5):
-                send(('Done',), to=parent())
                 
+            elif timeout(end_timeout):  # Timeout and send 'Done' if no txn in mempool
+                send(('Done',), to=parent())           
         return None       
 
-
-    def receive(msg= ('ProposalMsg',P, signed_P), from_=replica):
-        logger.info(f"source : {self} -> Received Proposal Msg from {replica} : Msg : {P}")
-        run_done = True
-        #logger.info(f'For* {self} {str(signed_P)}')
-        if str((P)) == server_public_keys[replica].verify(signed_P).decode('UTF-8'):
-           logger.info(f"source : {self} -> Proposal message verified from {replica}")
-        process_proposal_msg(P)
-        logger.info(f"source : {self} -> Proposal Msg sent.....")
-        return 
-
-    def receive(msg= ('VoteMsg', P), from_=replica):
-        logger.info(f"source {self} -> Received VoteMsg... from {replica}")
-        process_vote_msg(P)
-        return 
-
 class Client(process):
-    def setup(servers, nrequests, timeout, server_public_keys, private_key): 
+    def setup(servers, nrequests, server_public_keys, private_key, timeout=15): 
         self.retransmit_timeout = timeout
         self.pending_done = []
 
     def receive(msg= ('Done', command, signed_command), from_=replica):
         if command == server_public_keys[replica].verify(signed_command).decode('UTF-8'):
-            logger.info(f"--> Received Done for {command} from {replica} and verified")
+            logger.info(f"Received Done for {command} from {replica} and verified")
             if command in pending_done:
                 pending_done.remove(command)
-                logger.info(f"Removing :{command}--> new pending_done : {pending_done}")
         return 
 
     def run():
-        commands = ["start", "abc", "def"]
+        commands = [f"{self}:Task{i}" for i in range(1,nrequests+1)]
         pending_done = commands.copy()
-        commands.extend(["No Op","No Op"])
-        
+        commands.extend([f"{self}:No Op",f"{self}:No Op"])
         req = 0
-        ack_received = set()
-        debug(f"Starting Client with servers : {servers}")
         try:
             while req < len(commands):
                 command = commands[req]
                 txn = Txn(sender=self, command=command)
-
                 req_text = private_key.sign(str(txn).encode('UTF-8'))
                 logger.info(f"Sending {commands[req]} to {servers}")
                 send(('ClientRequest', req_text, txn), to=servers)
                 req+=1
         except Exception as e:
             pass
-
         notDone = True
-        count = 0
-
         while notDone:
-            if await (len(pending_done)==0):
-                send(('Done',), to=parent())
-            
-            elif timeout(15):
+            if await (len(pending_done)==0): # Done Received for all commands
+                send(('Done',), to=parent()) 
+            elif timeout(retransmit_timeout):
                 logger.info("Retransmission Started")
                 if len(pending_done) > 0:
                     command = pending_done[0]
                     txn = Txn(sender=self, command=command)
                     req_text = private_key.sign(str(txn).encode('UTF-8'))
                     logger.info(f"Retransmitting {command} to {servers}")
-                    send(('ClientRequest', req_text, txn), to=servers)
+                    send(('ClientRequest', req_text, txn), to=servers)            
                     
-                    command = "No Op"
+                    command = f"{self}:No Op"
                     txn = Txn(sender=self, command=command)
                     req_text = private_key.sign(str(txn).encode('UTF-8'))
-                    logger.info(f"Retransmitting {'re :'+command} to {servers}")
                     send(('ClientRequest', req_text, txn), to=servers)
                     txn = Txn(sender=self, command=command)
                     req_text = private_key.sign(str(txn).encode('UTF-8'))
-                    logger.info(f"Retransmitting {'re :'+command} to {servers}")
                     send(('ClientRequest', req_text, txn), to=servers)
                 else:
                     send(('Done',), to=parent())
 
-
 def main():
 
     nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 6
-    nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 2
+    nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 1
     nrequests = int(sys.argv[3]) if len(sys.argv) > 3 else 3
-    maxtimeout = int(sys.argv[4]) if len(sys.argv) > 4 else 3
-    send_failrate = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0
+    send_failrate = float(sys.argv[4]) if len(sys.argv) > 4 else 0.0
+    failed_validator_id = int(sys.argv[5]) if len(sys.argv) > 5 else -1
+    logger_file_name = str(sys.argv[6]) if len(sys.argv) > 6 else 'Test_{time}'
+    
+    
+    logger.add(f"./logs/{logger_file_name}.log", format="{time} | {level} | {message}")
+
     config(channel="fifo")
     servers = new(Validator, num= nservers, send= 0.0)
     clients = new(Client, num= nclients)
@@ -660,13 +671,13 @@ def main():
         client_private_keys[client] = client_private_key
    
     for idx, server in enumerate(servers):
-        # if idx == 4:
-        #     setup(server, (servers, maxtimeout, server_public_keys,client_public_keys, server_private_keys[server], clients, True))
-        # else:
-            setup(server, (servers, maxtimeout, server_public_keys,client_public_keys, server_private_keys[server], clients, False))
+        if idx == failed_validator_id:
+            setup(server, (servers, server_public_keys,client_public_keys, server_private_keys[server], clients, True))
+        else:
+            setup(server, (servers, server_public_keys,client_public_keys, server_private_keys[server], clients, False))
 
     for client in clients:    
-        setup(client, (list(servers), nrequests, maxtimeout, server_public_keys, client_private_keys[client]))
+        setup(client, (list(servers), nrequests, server_public_keys, client_private_keys[client]))
 
     start(servers)
     start(clients)
