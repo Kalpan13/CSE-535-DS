@@ -1,26 +1,13 @@
 import sys
 from treelib import Tree
-from scratchpad.structures import Block, ProposalMsg, VoteInfo, VoteMsg, QC, Txn
+from scratchpad.structures import Block, ProposalMsg, VoteInfo, VoteMsg, QC, Txn, TimeoutInfo, TC, TimeoutMsg, pendingTOBlock
 from loguru import logger
 from nacl.signing import SigningKey
 
-logger.add("./logs/file_{time}.log", format="{level} | {message}")
-
-
-class LogEntry:
-    """Fictional log entries."""
-    def __init__(self, term, client, command):
-        self.term = term
-        self.client = client
-        self.command = command
-
-    def __str__(self):
-        sl = ['LogEntry', str(self.term), str(self.client), str(self.command)]
-        return ':'.join(sl)
-
+logger.add("./logs/file_{time}.log", format="{time} | {level} | {message}")
 
 class Validator(process):
-    def setup(peers, maxTimeout, server_public_keys, client_public_keys, private_key, client):
+    def setup(peers, maxTimeout, server_public_keys, client_public_keys, private_key, client, leaderFail):
 
         # Safety Class Variables
         self.highest_vote_round = -1   # Max of round_value voted so far
@@ -32,11 +19,11 @@ class Validator(process):
         self.pending_votes = None
         self.high_qc = None
         self.high_commit_qc = None
-        self.f = 2
+        self.f = 0
         self.first_time = True
         self.counter = 0
         self.client = client
-
+        self.process_new_round_event_called = {}
         # ledger Variables
         self.genesis_block = Block(
             author=self,
@@ -62,54 +49,67 @@ class Validator(process):
         # Pacemaker Variables
         self.current_round = 0
         self.last_round_tc = None
-
+        self.pending_timeouts = {}
         # Mempool
         self.mempool = []   # Queue to maintain client transactions
 
         # Program End
-        self.alive = True
+        self.run_done = False
+        self.timer_duration = 10
+        self.leaderFail = leaderFail
 
     def run():
-        while alive:
-            #logger.info(f"source : {self} -> Current Leader {Leader_Election_get_leader(current_round)}")
-            --receive
+        
+        while True:
+            run_done = False
+            logger.debug(f"source : {self} waiting for next action..")
+            if await(some(received(('ProposalMsg', _, _)))):
+                logger.debug(f"Found Proposal Msg")
+                reset(received)    
+                pass
+            elif await(some(received(('TimeoutMsg', _)))):
+                logger.debug(f"Found Timeout Msg")
+                reset(received)    
+                pass
+            elif timeout(3):
+                run_done = True
+                logger.critical(f"source : {self} -> ...Round Timed out")
+                Pacemaker_local_timeout_round()
+                timer_duration = Pacemaker_get_round_timer(current_round)
+            
+            timer_duration = Pacemaker_get_round_timer(current_round)
 
-        if not alive:
-            return
-
-        #     pass
-        # #     output("Inside main loop")
-        #     while len(mempool) > 0:
-        #         output("Mempool loop")
-        #         if self == Leader_Election_get_leader():
-        #             round_timeout = 0
-        #         else:
-        #             round_timeout = random.randint(int(maxTimeout/2), maxTimeout) / 1000
-        #         validator_term(round_timeout)
-    
-    # def process_new_round_event():
-    #     if len(mempool) > 0:
-    #         if self == Leader_Election_get_leader():
-    #             b = Block_Tree_generate_block(mempool[0], current_round)
-    #             process_new_round_event
-    #         else:
-    #             pass
-    #             # Wait proposal 
-    #             # Do something with timeout
-
+    def receive(msg=('TimeoutMsg', T), from_=replica):
+        logger.debug(f"source : {self} -> Timeout msg received from {replica}")
+        process_timeout_msg(T)
 
     def receive(msg = ("ClientRequest", txn_signed, txn_orig), from_=client):
-
         txn = client_public_keys[client].verify(txn_signed).decode('UTF-8')
         if str(txn_orig)==txn:
-            logger.debug(f"source : {self} -> Client Request Received for {txn} and Verified...!")
+            logger.debug(f"source : {self}  -> Client Request Received for {txn} and Verified...!")
             mempool.append(txn_orig)
+            logger.debug(f"Current Mempool : {mempool}")
+            logger.debug(f"source : {self} -> Current Leader : {Leader_Election_get_leader(current_round)}")    
             if first_time and self == Leader_Election_get_leader(current_round):
-                first_time = False    
+                logger.debug("New round event")    
+                first_time = False
                 process_new_round_event()
-    def process_incoming_msgs():
-        --receive
-
+                
+    
+    def process_timeout_msg(M):
+        process_certificate_qc(M.tmo_info.high_qc)
+        process_certificate_qc(M.high_commit_qc)
+        logger.debug("Certificates verified")
+        #Pacemaker_advance_round_tc(M.last_round_tc)
+        tc = Pacemaker_process_remote_timeout(M)
+        logger.debug(f"source : {self} -> TC Formed.. {tc}")
+        if tc is not None:
+            Pacemaker_advance_round_tc(tc)
+            #self.process_new_round_event_called
+            logger.debug(f"source {self} -> Processing New Round event")
+            #process_new_round_event_called[current_round] = True
+            process_new_round_event(tc)
+    
     # def receive(msg =("ProposalMsg", P), from_=Leader_Election_get_leader()):
     #     process_proposal_msg(P)
 
@@ -125,7 +125,7 @@ class Validator(process):
         """ Update the highest qc round
 
         Args:
-            qc_round (int):
+            qc_round (int): QC round
         """
         highest_qc_round = max(qc_round, highest_qc_round)
 
@@ -134,31 +134,38 @@ class Validator(process):
         To check if `block_round` is the next round of `round` or not 
 
         Args:
-            block_round (int): [description]
-            round (int): [description]
+            block_round (int): round of a block
+            round (int): 
         Returns:
             bool: True if `block_round` == round + 1 else False
         """
         return round + 1 == block_round
     
-    # def Safety_safe_to_extend(block_round, qc_round, tc) :
-    #     # TODO : Check the type of tc
-    #     """ 
-    #     To check if current tc is safe to extend or not 
+    def get_max(tmo_high_qc_rounds):
+        tmo_high_qc_round = None
+        tmo_high_qc_round = max([i for i in tmo_high_qc_rounds if i is not None])
+        if tmo_high_qc_round is None:
+            return 0
+        else:
+            return tmo_high_qc_round
 
-    #     Args:
-    #         block_round (int): [description]
-    #         qc_round (int): [description]
-    #         tc (): [description]
-    #     Returns:
-    #         bool: 
-    #     """
-    #     # Two Conditions 
-    #     # 1. block_round is next round of tc.round
-    #     # 2. qc_round >= max (tc.tmo_high_qc_rounds)
-    #     return Safety_consecutive(block_round, tc.round) \
-    #         and qc_round >= max(tc.tmo_high_qc_rounds)
-    
+    def Safety_safe_to_extend(block_round, qc_round, tc) :
+        """ 
+        To check if current tc is safe to extend or not 
+
+        Args:
+            block_round (int): [description]
+            qc_round (int): [description]
+            tc (): [description]
+        Returns:
+            bool: 
+        """
+        # Two Conditions 
+        # 1. block_round is next round of tc.round
+        # 2. qc_round >= max (tc.tmo_high_qc_rounds)
+        logger.debug(f"Comparing : block_round : {block_round}, tc.round : {tc.roundx}, qc_round : {qc_round}, tmo_high_qc_rounds : {tc.tmo_high_qc_rounds}, max : {get_max(tc.tmo_high_qc_rounds)}")
+        return Safety_consecutive(block_round, tc.roundx) and qc_round >= get_max(tc.tmo_high_qc_rounds)
+            
     def Safety_safe_to_vote(block_round, qc_round, tc) :
         """
         To check if current tc is safe to vote or not
@@ -179,9 +186,21 @@ class Validator(process):
             return False
 
         # Extending QC from previous round || safe to extend due to tc
-        return Safety_consecutive(block_round, qc_round) 
-        #    or safe_to_extend(block_round, qc_round, tc)
+        return Safety_consecutive(block_round, qc_round) \
+            or Safety_safe_to_extend(block_round, qc_round, tc)
     
+    def Safety_safe_to_timeout(roundx, qc_round, tc):
+        if qc_round is None:  # Base case
+            if tc is not None:
+                return Safety_consecutive(roundx, tc.roundx)
+            else:
+                return True
+        else:
+            if qc_round < highest_qc_round or \
+                roundx < max(highest_vote_round-1, qc_round):
+                return False
+
+        return Safety_consecutive(roundx, qc_round) or Safety_consecutive(roundx, tc.roundx)
     # def Safety_commit_state_id_candidate(block_round, qc):
     #     """[summary]
 
@@ -199,12 +218,12 @@ class Validator(process):
     def Safety_make_vote(b, last_tc = None):
         # Handling Base Cases 
         # Case 1 : 1st Round : 1 Proposal, 0 QC
-        if b.qc is None and current_round == 0:
-            qc_round = -1
+        if b.qc is None:
+            qc_round = current_round - 1  # Base case
             logger.critical(f"source : -> {self} Round info block round :{b.roundx} : QC round {qc_round}")
             logger.critical(f"source : -> {self} Block : {b}")
             
-            if Safety_safe_to_vote(b.roundx, qc_round, None):
+            if Safety_safe_to_vote(b.roundx, qc_round, last_tc):
                 Safety_update_highest_qc_round(qc_round) # Protect QC round
                 Safety_increase_highest_vote_round(b.roundx)
                 vote_info = VoteInfo(idx = b.idx, roundx = b.roundx, parent_id = -1, parent_round = qc_round)
@@ -213,25 +232,37 @@ class Validator(process):
                 return vote_msg
 
         else:
+            logger.debug(f"source : {self} -> Block : {b} : last_tc : {last_tc}")
             qc_round = b.qc.vote_info.roundx  # qc_round of block
-            if Safety_safe_to_vote(b.roundx, qc_round, None):
+            logger.debug(f"source {self} -> Safe to vote : {Safety_safe_to_vote(b.roundx, qc_round, last_tc)}")
+
+            if Safety_safe_to_vote(b.roundx, qc_round, last_tc):
                 Safety_update_highest_qc_round(qc_round) # Protect QC round
                 Safety_increase_highest_vote_round(b.roundx)
                 vote_info = VoteInfo(idx = b.idx, roundx = b.roundx, parent_id = b.qc.vote_info.idx, parent_round = qc_round)
                 vote_msg = VoteMsg(vote_info = vote_info, high_commit_qc = high_commit_qc, sender = self)
+                logger.debug(f"source : -> {self} Vote Msg Created : {str(vote_msg)}")
                 return vote_msg
 
         return None
     
-    # def Safety_make_timeout(roundx, high_qc, last_tc = None):
-    #     # if self.valid_signatures(b, last_tc) and self.safe_to_vote(b.round, qc_round, last_tc):
-    #     #     self.update_highest_qc_round(qc_round)
-    #     #     self.increase_highest_vote_round(b.round)
-    #     pass
+    def Safety_make_timeout(roundx, high_qc, last_tc = None):
+        logger.debug(f"source : {self} -> Stuck here")
+        if high_qc is not None:
+            qc_round = high_qc.vote_info.roundx
+        else:
+            qc_round = None
 
-    # def Safety_valid_signatures(b, last_tc):
-    #     # TODO : Implement this : Validate with available Public keys 
-    #     return True
+        if Safety_valid_signatures(high_qc, last_tc) and Safety_safe_to_timeout(roundx, qc_round, last_tc):
+            Safety_increase_highest_vote_round(roundx)
+            tmo_info = TimeoutInfo(roundx=roundx,high_qc=high_qc, sender=self)
+            return tmo_info
+        
+        return None
+
+    def Safety_valid_signatures(b, last_tc):
+        # TODO : Implement this : Validate with available Public keys 
+        return True
     
     ########### pending tree ############ 
     def pending_block_tree_prune(block_id):
@@ -239,6 +270,7 @@ class Validator(process):
             pending_block_tree.remove_node(sibling.identifier)
 
     def pending_block_tree_add(b):
+        logger.debug(f"source : {self} -> Adding {b} to pending block tree")
         if b.qc is None:
             pending_block_tree.create_node(str(b.payload), identifier=b.idx, parent=-1, data = b)
         else:
@@ -252,11 +284,10 @@ class Validator(process):
         else:
             ledger_tree.create_node(str(txns), identifier=block.idx, parent=prev_block_id, data = block)
         
-        logger.debug(f"source : {self} -> Node Created..")
-
-        ledger_tree.show(idhidden=False, data_property='payload')
-        output(ledger_tree.show(idhidden=False, data_property='payload'))
-        print(ledger_tree.show(idhidden=False, data_property='payload'))
+        logger.debug(f"source : {self} -> Node Created.")
+        logger.debug(f"source : {self} -> Tree View : {ledger_tree.to_json()}")
+        output(ledger_tree.show(idhidden=False, data_property='isCommitted'))
+        
         return
     
     # def Ledger_pending_state(block_id):
@@ -266,8 +297,8 @@ class Validator(process):
     #         return 
 
     def Ledger_commit(block_id):
-        logger.critical(f"source : {self} -> Ledger Tree View : ")
-
+        logger.critical(f"source : {self} -> Ledger : Fetching block : {block_id}")
+        logger.critical(f"source : {self} -> Get Node : {ledger_tree.get_node(block_id)}")
         if not ledger_tree.get_node(block_id).data.isCommitted:
             logger.critical(f"source : {self} -> trying to commit block : {block_id}")    
             logger.critical(f"Node with given block id :{ledger_tree.get_node(block_id).data.isCommitted}")
@@ -275,8 +306,9 @@ class Validator(process):
             ledger_tree.get_node(block_id).data = ledger_tree.get_node(block_id).data._replace(isCommitted=True)
             logger.debug(f"source : {self} -> Block : {block_id} committed")
             print(f"Current Replica : {self}")
-            logger.debug(ledger_tree.show(idhidden=False, data_property='payload'))
-    
+            ledger_tree.show(idhidden=False, data_property='payload')
+            for sibling in ledger_tree.siblings(block_id):
+                ledger_tree.remove_node(sibling.identifier)
             return True
         return False
 
@@ -319,16 +351,20 @@ class Validator(process):
         Block_Tree_process_qc(vote_msg.high_commit_qc)
         
         # TODO : Implement Timeout
-        if await(len(setof(p, received(('VoteMsg',_),
-                                       from_=p))) >= 2*f+1):
+        if self == Leader_Election_get_leader(current_round+1):
+            logger.debug(f"source : {self} -> Wating for 2*f + 1 vote msgs, leader : {Leader_Election_get_leader(current_round)}")
+            if await(len(setof(p, received(('VoteMsg',_),
+                                        from_=p))) >= 2*f+1):
 
-            if self != Leader_Election_get_leader(current_round):
-                
-                logger.debug(f"source : {self} -> Received Votes from 2*f + 1")
-                reset(received)
-                qc = QC(vote_info=vote_msg.vote_info, author = self)
-                logger.debug(f"source : {self} -> QC Formed for {qc} broadcasting to all")
-                return qc
+                # s = None
+                # s = received(('VoteMsg',_),from_=p)
+                # logger.critical(f"Sender Details : {s}")
+                if self != Leader_Election_get_leader(current_round):
+                    logger.debug(f"source : {self} -> Received Votes from 2*f + 1")
+                    reset(received)
+                    qc = QC(vote_info=vote_msg.vote_info, author = self)
+                    logger.debug(f"source : {self} -> QC Formed for {qc} broadcasting to all")
+                    return qc
         return None
     ############ Leader Election ############ 
     def Leader_Election_update_leaders(qc):
@@ -344,11 +380,12 @@ class Validator(process):
     
     ############ Pacemaker ############  
     def Pacemaker_start_timer(new_round):
-        logger.debug(f"Advancing to {new_round} from {current_round}")
+        logger.debug(f"source : {self} -> Advancing to {new_round} from {current_round} : run_done {run_done}")
         current_round = new_round
-
+        run_done = False
+        
     def Pacemaker_advance_round_qc(qc):
-        #output(f"Current round : {current_round} with qc : {qc}")
+        output(f"Current round : {current_round} with qc : {qc}")
         if qc is None:
             return False
 
@@ -363,9 +400,51 @@ class Validator(process):
         last_round_tc = None
         #start_timer(qc.vote.info.round+1)  # TODO : Implement this
         return True
-    
+
+    def Pacemaker_advance_round_tc(tc):
+        logger.debug(f"Current tc : {tc}")
+        if tc is None or tc.roundx < current_round:
+            return False
+        last_round_tc = tc
+        run_done = True
+        logger.critical(f"source : {self} -> Pacemaker advancing round tc")
+        Pacemaker_start_timer(tc.roundx+1)
+        return True
+
+    def Pacemaker_process_remote_timeout(T):
+        tmo_info = T.tmo_info
+        if tmo_info.roundx < current_round:
+            return None
+        
+        if tmo_info.sender not in pending_timeouts.get(tmo_info.roundx, pendingTOBlock()).senders:
+            pending_to_block = pending_timeouts.get(tmo_info.roundx,pendingTOBlock()) 
+            updated_senders = pending_to_block.senders.union({tmo_info.sender})
+            pending_to_block = pending_to_block._replace(senders=updated_senders)
+            pending_to_block_tmo_info = pending_to_block.tmo_info
+            pending_to_block_tmo_info.append(tmo_info)
+            pending_to_block = pending_to_block._replace(tmo_info=pending_to_block_tmo_info)
+            pending_timeouts[tmo_info.roundx] = pending_to_block
+
+            logger.critical(f"source : {self} -> Pending Timeouts {pending_timeouts}")
+
+        if len(pending_timeouts[tmo_info.roundx].senders) >= (2*f+1):
+            tmo_high_qc_rounds = [t.high_qc.vote_info.roundx if t.high_qc is not None else None for t in pending_timeouts[tmo_info.roundx].tmo_info]
+            tc = TC(roundx=tmo_info.roundx, tmo_high_qc_rounds = tmo_high_qc_rounds)
+            logger.debug(f"sender : {self} -> TC genrated : {tc}")
+            return tc
+
+    def Pacemaker_get_round_timer(current_round):
+        return 650
+
+    def Pacemaker_local_timeout_round():
+        timeout_info = Safety_make_timeout(current_round, high_qc, last_round_tc)
+        logger.critical(f"sender :{self} -> Timeout Info Created : {timeout_info}")
+        timeout_msg = TimeoutMsg(tmo_info=timeout_info,last_round_tc=last_round_tc,high_commit_qc=high_commit_qc)
+        logger.critical(f"sender :{self} -> Broadcasting Timeout msg : {timeout_msg}")
+        send(('TimeoutMsg', timeout_msg), to=peers)
+        
     def process_certificate_qc(qc):
-        logger.debug("Reached process certificate QC")
+        logger.debug(f"source : {self} -> Reached process certificate QC : {qc}")
         Block_Tree_process_qc(qc)
         Leader_Election_update_leaders(qc)
         if Pacemaker_advance_round_qc(qc):
@@ -375,24 +454,21 @@ class Validator(process):
         logger.debug("Processing process_certificate qc")
         process_certificate_qc(P.block.qc)
         process_certificate_qc(P.high_commit_qc)
-        
+        Pacemaker_advance_round_tc(P.last_round_tc)
         roundx = current_round
         current_leader = Leader_Election_get_leader(current_round)
-        
         if P.block.roundx != roundx or P.block.author != current_leader:
             return
-        
         Block_Tree_execute_and_insert(P.block)  # Adding a new speculative state to ledger
         pending_block_tree_add(P.block)
-        vote_msg = Safety_make_vote(P.block)
+        vote_msg = Safety_make_vote(P.block,P.last_round_tc)
         if vote_msg is not None:
-            logger.debug(f"Sending msg to {Leader_Election_get_leader(current_round+1)}")
+            logger.debug(f"source : {self} -> Sending msg to {Leader_Election_get_leader(current_round+1)}")
             send(('VoteMsg',vote_msg), to=Leader_Election_get_leader(current_round+1))
-    
+            return
+        
     def process_vote_msg(P):
-        logger.debug("Reached in process_vote_msg")
         qc = Block_Tree_process_vote(P)
-        logger.debug("Block_Tree_process_vote completed")
         if qc is not None:
             process_certificate_qc(qc)
             process_new_round_event(None)
@@ -415,41 +491,65 @@ class Validator(process):
     
     
     def process_new_round_event(last_tc = None):
-        logger.debug("******************************",current_round,"******************************************")
-
-        if self == Leader_Election_get_leader(current_round):
-            if len(mempool)==0:
-                logger.error("Reached till No Op")
-                mempool.append(Txn(sender=None, command="No Op"))
-            else:
-                logger.critical(f"source : {self} -> Generating Proposal Msg for {current_round} with {mempool[0].command}")
-                
-            b = Block_Tree_generate_block(mempool[0], current_round)
-            #a = mempool.pop(0)
-            p = ProposalMsg(block=b, last_round_tc=last_tc, high_commit_qc=high_commit_qc)
-
-            send(('ProposalMsg', p,  private_key.sign(str(p).encode('UTF-8'))), to=peers)
+        logger.debug(f"******************************{current_round}******************************************")
+        logger.debug(f"Leader : {Leader_Election_get_leader(current_round)}")
             
-            await(self!=Leader_Election_get_leader(current_round))
+        if self == Leader_Election_get_leader(current_round) and not leaderFail:
+            logger.debug(f"Mempool size : {len(mempool)}")
+            if await(len(mempool)!=0):
+                b = Block_Tree_generate_block(mempool[0], current_round)
+                logger.critical(f"source : {self} -> Generating Proposal Msg for {current_round} with {mempool[0].command}")
+                p = ProposalMsg(block=b, last_round_tc=last_tc, high_commit_qc=high_commit_qc)
+                logger.critical(f"source : {self} -> Generated Proposal : {p} for {current_round} with {mempool[0].command}")
+                
+                send(('ProposalMsg', p,  private_key.sign(str(p).encode('UTF-8'))), to=peers)
+                #if await(self!=Leader_Election_get_leader(current_round))
+        
+            elif timeout(20):
+                send(('Done',), to=parent())
+                # mempool.append(Txn(sender=None, command="No Op"))
+                # b = Block_Tree_generate_block(mempool[0], current_round)
+                # logger.critical(f"source : {self} -> Generating Proposal Msg for {current_round} with {mempool[0].command}")
+                # p = ProposalMsg(block=b, last_round_tc=last_tc, high_commit_qc=high_commit_qc)
+                # send(('ProposalMsg', p,  private_key.sign(str(p).encode('UTF-8'))), to=peers)
+                # await(self!=Leader_Election_get_leader(current_round))
+        
+        return None       
+
 
     def receive(msg= ('ProposalMsg',P, signed_P), from_=replica):
-
-        logger.debug(f"Received Proposal Msg from {replica}")
+        logger.debug(f"source : {self} -> Received Proposal Msg from {replica} : Msg : {P}")
+        run_done = True
         #logger.debug(f'For* {self} {str(signed_P)}')
         if str((P)) == server_public_keys[replica].verify(signed_P).decode('UTF-8'):
-           logger.debug(f"Proposal message verified from {replica}")
+           logger.debug(f"source : {self} -> Proposal message verified from {replica}")
         process_proposal_msg(P)
-    
-    def receive(msg= ('VoteMsg', P)):
-        logger.debug(f"Received VoteMsg...")
+        logger.debug(f"source : {self} -> Proposal Msg sent.....")
+        return 
+
+    def receive(msg= ('VoteMsg', P), from_=replica):
+        logger.debug(f"source {self} -> Received VoteMsg... from {replica}")
         process_vote_msg(P)
+        return 
 
 class Client(process):
-    def setup(servers, nrequests, timeout, server_public_keys, private_key): pass
-        
+    def setup(servers, nrequests, timeout, server_public_keys, private_key): 
+        self.retransmit_timeout = timeout
+        self.pending_done = []
+
+    def receive(msg= ('Done', command, signed_command), from_=replica):
+        if command == server_public_keys[replica].verify(signed_command).decode('UTF-8'):
+            logger.critical(f"--> Received Done for {command} from {replica} and verified")
+            if command in pending_done:
+                pending_done.remove(command)
+                logger.debug(f"Removing :{command}--> new pending_done : {pending_done}")
+        return 
+
     def run():
-        commands = ["start", "abc", "def"]
-        #target = random.choice(servers)
+        commands = ["start", "abc", "def","ghi","test1","test2"]
+        pending_done = commands.copy()
+        commands.extend(["No Op","No Op"])
+        
         req = 0
         ack_received = set()
         debug(f"Starting Client with servers : {servers}")
@@ -461,32 +561,45 @@ class Client(process):
                 req_text = private_key.sign(str(txn).encode('UTF-8'))
                 logger.debug(f"Sending {commands[req]} to {servers}")
                 send(('ClientRequest', req_text, txn), to=servers)
-                # if await(some(received(('NotLeader', _req, leader)),
-                #           has= leader is not None)):
-                #     debug("Wrong server, changing to", leader)
-                #     target = leader
-                #     reset(received)
                 req+=1
         except Exception as e:
-            logger.critical(f"Exception caught : {e}")        
+            pass
+
         notDone = True
         count = 0
+
         while notDone:
-            if await(some(received(('Done', command, signed_command),from_=replica))):
-                if command == server_public_keys[replica].verify(signed_command).decode('UTF-8'):
-                    logger.critical(f"Received Done for {command} from {replica} and verified")
-                    count+=1
-                    reset(received)
-                    if count==len(commands):
-                        notDone = False
-                        send(('Done',), to=parent())
+            if await (len(pending_done)==0):
+                send(('Done',), to=parent())
+            
+            elif timeout(10):
+                logger.debug("Retransmission Started")
+                if len(pending_done) > 0:
+                    command = pending_done[0]
+                    txn = Txn(sender=self, command=command)
+                    req_text = private_key.sign(str(txn).encode('UTF-8'))
+                    logger.debug(f"Retransmitting {command} to {servers}")
+                    send(('ClientRequest', req_text, txn), to=servers)
+                    
+                    command = "No Op"
+                    txn = Txn(sender=self, command=command)
+                    req_text = private_key.sign(str(txn).encode('UTF-8'))
+                    logger.debug(f"Retransmitting {'re :'+command} to {servers}")
+                    send(('ClientRequest', req_text, txn), to=servers)
+                    txn = Txn(sender=self, command=command)
+                    req_text = private_key.sign(str(txn).encode('UTF-8'))
+                    logger.debug(f"Retransmitting {'re :'+command} to {servers}")
+                    send(('ClientRequest', req_text, txn), to=servers)
+                else:
+                    send(('Done',), to=parent())
+
 
 def main():
 
-    nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 5
-    nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 2
+    nservers = int(sys.argv[1]) if len(sys.argv) > 1 else 7
+    nclients = int(sys.argv[2]) if len(sys.argv) > 2 else 1
     nrequests = int(sys.argv[3]) if len(sys.argv) > 3 else 3
-    maxtimeout = int(sys.argv[4]) if len(sys.argv) > 4 else 3000
+    maxtimeout = int(sys.argv[4]) if len(sys.argv) > 4 else 3
     send_failrate = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0
     config(channel="fifo")
     servers = new(Validator, num= nservers, send= 0.0)
@@ -509,8 +622,11 @@ def main():
         client_public_keys[client] = client_public_key
         client_private_keys[client] = client_private_key
    
-    for server in servers:
-        setup(server, (servers, maxtimeout, server_public_keys,client_public_keys, server_private_keys[server], clients))
+    for idx, server in enumerate(servers):
+        if idx == 2:
+            setup(server, (servers, maxtimeout, server_public_keys,client_public_keys, server_private_keys[server], clients, True))
+        else:
+            setup(server, (servers, maxtimeout, server_public_keys,client_public_keys, server_private_keys[server], clients, False))
 
     for client in clients:    
         setup(client, (list(servers), nrequests, maxtimeout, server_public_keys, client_private_keys[client]))
@@ -518,5 +634,7 @@ def main():
     start(servers)
     start(clients)
     await(each(c in clients, has=received(('Done',), from_=c)))
-    logger.debug("All clients done.")
+    end(clients)
     end(servers)
+    logger.debug("All clients done.")
+    
