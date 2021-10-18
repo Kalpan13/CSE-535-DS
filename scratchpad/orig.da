@@ -1,23 +1,10 @@
 import sys
 from treelib import Tree
-from scratchpad.structures import Block, ProposalMsg, VoteInfo, VoteMsg, QC, Txn
+from scratchpad.structures import Block, ProposalMsg, VoteInfo, VoteMsg, QC, Txn, TimeoutInfo, TC, TimeoutMsg, pendingTOBlock
 from loguru import logger
 from nacl.signing import SigningKey
 
-logger.add("./logs/file_{time}.log", format="{level} | {message}")
-
-
-class LogEntry:
-    """Fictional log entries."""
-    def __init__(self, term, client, command):
-        self.term = term
-        self.client = client
-        self.command = command
-
-    def __str__(self):
-        sl = ['LogEntry', str(self.term), str(self.client), str(self.command)]
-        return ':'.join(sl)
-
+logger.add("./logs/file_{time}.log", format="{time} | {level} | {message}")
 
 class Validator(process):
     def setup(peers, maxTimeout, server_public_keys, client_public_keys, private_key, client):
@@ -62,52 +49,37 @@ class Validator(process):
         # Pacemaker Variables
         self.current_round = 0
         self.last_round_tc = None
-
+        self.pending_timeouts = {}
         # Mempool
         self.mempool = []   # Queue to maintain client transactions
 
         # Program End
         self.run_done = False
+        self.timer_duration = 0
 
     def run():
         
-        while not run_done:
+        while True:
             run_done = False
-            #--receive
-            timer_duration = Pacemaker_get_round_timer(current_round)
+            if timer_duration != 0:
+                --receive
+            #timer_duration = Pacemaker_get_round_timer(current_round)
+            #timer_duration = 
             if await run_done:
                 pass
-            elif timeout(timer_duration): 
+            elif timeout(timer_duration):
+                run_done = True
+                #logger.critical(f"source : {self} -> ...Round Timed out")
                 Pacemaker_local_timeout_round()
-            #logger.info(f"source : {self} -> Current Leader {Leader_Election_get_leader(current_round)}")
+                timer_duration = Pacemaker_get_round_timer(current_round)
             
+            timer_duration = Pacemaker_get_round_timer(current_round)
 
-        if run_done:
-            return
-
-        #     pass
-        # #     output("Inside main loop")
-        #     while len(mempool) > 0:
-        #         output("Mempool loop")
-        #         if self == Leader_Election_get_leader():
-        #             round_timeout = 0
-        #         else:
-        #             round_timeout = random.randint(int(maxTimeout/2), maxTimeout) / 1000
-        #         validator_term(round_timeout)
-    
-    # def process_new_round_event():
-    #     if len(mempool) > 0:
-    #         if self == Leader_Election_get_leader():
-    #             b = Block_Tree_generate_block(mempool[0], current_round)
-    #             process_new_round_event
-    #         else:
-    #             pass
-    #             # Wait proposal 
-    #             # Do something with timeout
-
+    def receive(msg=('TimeoutMsg', T), from_=replica):
+        logger.debug(f"source : {self} -> Timeout msg received from {replica}")
+        process_timeout_msg(T)
 
     def receive(msg = ("ClientRequest", txn_signed, txn_orig), from_=client):
-
         txn = client_public_keys[client].verify(txn_signed).decode('UTF-8')
         if str(txn_orig)==txn:
             logger.debug(f"source : {self}  -> Client Request Received for {txn} and Verified...!")
@@ -115,9 +87,16 @@ class Validator(process):
             if first_time and self == Leader_Election_get_leader(current_round):
                 first_time = False    
                 process_new_round_event()
-    def process_incoming_msgs():
-        --receive
-
+    
+    def process_timeout_msg(M):
+        process_certificate_qc(M.tmo_info.high_qc)
+        process_certificate_qc(M.high_commit_qc)
+        logger.debug("Certificates verified")
+        Pacemaker_advance_round_tc(M.last_round_tc)
+        tc = Pacemaker_process_remote_timeout(M)
+        if tc is not None:
+            Pacemaker_advance_round_tc(tc)
+    
     # def receive(msg =("ProposalMsg", P), from_=Leader_Election_get_leader()):
     #     process_proposal_msg(P)
 
@@ -133,7 +112,7 @@ class Validator(process):
         """ Update the highest qc round
 
         Args:
-            qc_round (int):
+            qc_round (int): QC round
         """
         highest_qc_round = max(qc_round, highest_qc_round)
 
@@ -142,15 +121,14 @@ class Validator(process):
         To check if `block_round` is the next round of `round` or not 
 
         Args:
-            block_round (int): [description]
-            round (int): [description]
+            block_round (int): round of a block
+            round (int): 
         Returns:
             bool: True if `block_round` == round + 1 else False
         """
         return round + 1 == block_round
     
     # def Safety_safe_to_extend(block_round, qc_round, tc) :
-    #     # TODO : Check the type of tc
     #     """ 
     #     To check if current tc is safe to extend or not 
 
@@ -190,6 +168,18 @@ class Validator(process):
         return Safety_consecutive(block_round, qc_round) 
         #    or safe_to_extend(block_round, qc_round, tc)
     
+    def Safety_safe_to_timeout(roundx, qc_round, tc):
+        if qc_round is None:  # Base case
+            if tc is not None:
+                return Safety_consecutive(roundx, tc.round)
+            else:
+                return True
+        else:
+            if qc_round < highest_qc_round or \
+                roundx < max(highest_vote_round-1, qc_round):
+                return False
+
+        return Safety_consecutive(roundx, qc_round) or Safety_consecutive(roundx, tc.round)
     # def Safety_commit_state_id_candidate(block_round, qc):
     #     """[summary]
 
@@ -231,15 +221,22 @@ class Validator(process):
 
         return None
     
-    # def Safety_make_timeout(roundx, high_qc, last_tc = None):
-    #     # if self.valid_signatures(b, last_tc) and self.safe_to_vote(b.round, qc_round, last_tc):
-    #     #     self.update_highest_qc_round(qc_round)
-    #     #     self.increase_highest_vote_round(b.round)
-    #     pass
+    def Safety_make_timeout(roundx, high_qc, last_tc = None):
+        if high_qc is not None:
+            qc_round = high_qc.vote_info.round
+        else:
+            qc_round = high_qc
 
-    # def Safety_valid_signatures(b, last_tc):
-    #     # TODO : Implement this : Validate with available Public keys 
-    #     return True
+        if Safety_valid_signatures(high_qc, last_tc) and Safety_safe_to_timeout(roundx, qc_round, last_tc):
+            Safety_increase_highest_vote_round(roundx)
+            tmo_info = TimeoutInfo(roundx=roundx,high_qc=high_qc, sender=self)
+            return tmo_info
+        
+        return None
+
+    def Safety_valid_signatures(b, last_tc):
+        # TODO : Implement this : Validate with available Public keys 
+        return True
     
     ########### pending tree ############ 
     def pending_block_tree_prune(block_id):
@@ -262,7 +259,7 @@ class Validator(process):
         
         logger.debug(f"source : {self} -> Node Created..")
 
-        #output(ledger_tree.show(idhidden=False, data_property='payload'))
+        output(ledger_tree.show(idhidden=False, data_property='payload'))
         
         return
     
@@ -332,11 +329,12 @@ class Validator(process):
             # s = None
             # s = received(('VoteMsg',_),from_=p)
             # logger.critical(f"Sender Details : {s}")
-            logger.debug(f"source : {self} -> Received Votes from 2*f + 1")
-            reset(received)
-            qc = QC(vote_info=vote_msg.vote_info, author = self)
-            logger.debug(f"source : {self} -> QC Formed for {qc} broadcasting to all")
-            return qc
+            if self != Leader_Election_get_leader(current_round):
+                logger.debug(f"source : {self} -> Received Votes from 2*f + 1")
+                reset(received)
+                qc = QC(vote_info=vote_msg.vote_info, author = self)
+                logger.debug(f"source : {self} -> QC Formed for {qc} broadcasting to all")
+                return qc
         return None
     ############ Leader Election ############ 
     def Leader_Election_update_leaders(qc):
@@ -352,10 +350,10 @@ class Validator(process):
     
     ############ Pacemaker ############  
     def Pacemaker_start_timer(new_round):
-        run_done = True
         logger.debug(f"Advancing to {new_round} from {current_round} : run_done {run_done}")
         current_round = new_round
-
+        run_done = False
+        
     def Pacemaker_advance_round_qc(qc):
         #output(f"Current round : {current_round} with qc : {qc}")
         if qc is None:
@@ -372,13 +370,49 @@ class Validator(process):
         last_round_tc = None
         #start_timer(qc.vote.info.round+1)  # TODO : Implement this
         return True
-    
+
+    def Pacemaker_advance_round_tc(tc):
+        logger.debug(f"Current tc : {tc}")
+        if tc is None or tc.roundx < current_round:
+            return False
+        last_round_tc = tc
+        #run_done = True
+        logger.critical(f"source : {self} -> Pacemaker advancing round tc")
+        Pacemaker_start_timer(tc.roundx+1)
+        return True
+
+    def Pacemaker_process_remote_timeout(T):
+        tmo_info = T.tmo_info
+        if tmo_info.roundx < current_round:
+            return None
+        
+        if tmo_info.sender not in pending_timeouts.get(tmo_info.roundx, pendingTOBlock()).senders:
+            pending_to_block = pending_timeouts.get(tmo_info.roundx,pendingTOBlock()) 
+            updated_senders = pending_to_block.senders.union({tmo_info.sender})
+            pending_to_block = pending_to_block._replace(senders=updated_senders)
+            pending_to_block_tmo_info = pending_to_block.tmo_info
+            pending_to_block_tmo_info.append(tmo_info)
+            pending_to_block = pending_to_block._replace(tmo_info=pending_to_block_tmo_info)
+            pending_timeouts[tmo_info.roundx] = pending_to_block
+
+            logger.critical(f"source : {self} -> Pending Timeouts {pending_timeouts}")
+
+        if len(pending_timeouts[tmo_info.roundx].senders) >= (2*f+1):
+            tmo_high_qc_rounds = [t.high_qc.roundx if t.high_qc is not None else None for t in pending_timeouts[tmo_info.roundx].tmo_info]
+            tc = TC(roundx=tmo_info.roundx, tmo_high_qc_rounds = tmo_high_qc_rounds)
+            logger.debug(f"sender : {self} -> TC genrated : {tc}")
+            return tc
+
     def Pacemaker_get_round_timer(current_round):
         return 650
 
     def Pacemaker_local_timeout_round():
-        logger.critical("Processing Local Timeout...")
-
+        timeout_info = Safety_make_timeout(current_round, high_qc, last_round_tc)
+        logger.critical(f"sender :{self} -> Timeout Info Created : {timeout_info}")
+        timeout_msg = TimeoutMsg(tmo_info=timeout_info,last_round_tc=last_round_tc,high_commit_qc=high_commit_qc)
+        logger.critical(f"sender :{self} -> Broadcasting Timeout msg : {timeout_msg}")
+        send(('TimeoutMsg', timeout_msg), to=peers)
+        
     def process_certificate_qc(qc):
         logger.debug("Reached process certificate QC")
         Block_Tree_process_qc(qc)
@@ -401,13 +435,11 @@ class Validator(process):
         pending_block_tree_add(P.block)
         vote_msg = Safety_make_vote(P.block)
         if vote_msg is not None:
-            logger.debug(f"Sending msg to {Leader_Election_get_leader(current_round+1)}")
+            logger.debug(f"source : {self} -> Sending msg to {Leader_Election_get_leader(current_round+1)}")
             send(('VoteMsg',vote_msg), to=Leader_Election_get_leader(current_round+1))
     
     def process_vote_msg(P):
-        logger.debug("Reached in process_vote_msg")
         qc = Block_Tree_process_vote(P)
-        logger.debug("Block_Tree_process_vote completed")
         if qc is not None:
             process_certificate_qc(qc)
             process_new_round_event(None)
@@ -448,7 +480,7 @@ class Validator(process):
             await(self!=Leader_Election_get_leader(current_round))
 
     def receive(msg= ('ProposalMsg',P, signed_P), from_=replica):
-        logger.debug(f"Received Proposal Msg from {replica}")
+        logger.debug(f"source : {self} -> Received Proposal Msg from {replica}")
         run_done = True
         #logger.debug(f'For* {self} {str(signed_P)}')
         if str((P)) == server_public_keys[replica].verify(signed_P).decode('UTF-8'):
