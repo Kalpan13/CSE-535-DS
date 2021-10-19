@@ -41,4 +41,4 @@ fail_idx : node_id to be stopped
 logger_file_name : name of log file
 
 
-## Run `run_config.sh` for running provided test cases 
+### Run `run_config.sh` for running provided test cases 
