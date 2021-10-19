@@ -58,7 +58,6 @@ src/structures.py
 ### No of lines for logging : 37
 ### References
 1. [State Machine Replication : Diem-v4](https://developers.diem.com/docs/technical-papers/state-machine-replication-paper/)
-2. [DistAlgo](https://github.com/DistAlgo/distalgo) 
 
 
 ### Known bugs
